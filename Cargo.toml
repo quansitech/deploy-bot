@@ -1,0 +1,66 @@
+[package]
+name = "deploy-bot"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Async runtime utilities
+futures = "0.3"
+anyhow = "1"
+thiserror = "1"
+once_cell = "1"
+parking_lot = "0.12"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# HTTP utilities
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+
+# Database
+rusqlite = { version = "0.31", features = ["bundled"] }
+refinery = { version = "0.9", features = ["rusqlite-bundled"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# WebSocket
+tokio-tungstenite = "0.21"
+futures-util = "0.3"
+
+# Template engine
+askama = { version = "0.12", features = ["with-axum"] }
+askama_axum = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+mockall = "0.12"
+
+[profile.dev]
+debug = true
+opt-level = 0
+debug-assertions = true
+overflow-checks = true
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

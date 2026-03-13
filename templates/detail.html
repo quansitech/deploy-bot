@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}部署详情 - {{ deployment.id }}{% endblock %}
+
+{% block content %}
+<a href="/" class="back-link">← 返回列表</a>
+
+<h1>部署详情</h1>
+
+<div class="detail-grid">
+    <div class="detail-label">ID</div>
+    <div>{{ deployment.id }}</div>
+
+    <div class="detail-label">项目名称</div>
+    <div>{{ deployment.project_name }}</div>
+
+    <div class="detail-label">仓库地址</div>
+    <div>{{ deployment.project.repo_url }}</div>
+
+    <div class="detail-label">分支</div>
+    <div>{{ deployment.project.branch }}</div>
+
+    <div class="detail-label">项目类型</div>
+    <div>{{ deployment.project.project_type }}</div>
+
+    <div class="detail-label">状态</div>
+    <div><span id="status-display" class="status {{ status_str }}">{{ status_str }}</span></div>
+
+    <div class="detail-label">创建时间</div>
+    <div>{{ deployment.created_at_local() }}</div>
+
+    <div class="detail-label">开始时间</div>
+    <div>{% match deployment.started_at_local() %}{% when Some with (t) %}{{ t }}{% else %}-{% endmatch %}</div>
+
+    <div class="detail-label">完成时间</div>
+    <div>{% match deployment.finished_at_local() %}{% when Some with (t) %}{{ t }}{% else %}-{% endmatch %}</div>
+</div>
+
+<div id="action-buttons" style="margin-bottom: 20px;">
+    {% if status_str == "Pending" %}
+    <form method="POST" action="/deploy/{{ deployment.id }}/delete" style="display:inline;">
+        <button type="submit" class="btn-delete">删除任务</button>
+    </form>
+    {% endif %}
+    {% if status_str == "Failed" %}
+    <form method="POST" action="/deploy/{{ deployment.id }}/retry" style="display:inline;">
+        <button type="submit" class="btn-retry">重试任务</button>
+    </form>
+    {% endif %}
+</div>
+
+<h2>部署日志</h2>
+<div id="log-container" class="log-container">
+    {% for log in logs %}
+    <div class="log-entry {{ log.level }}">
+        <span class="log-timestamp">[{{ log.timestamp.format("%H:%M:%S") }}]</span>
+        {{ log.message }}
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const deploymentId = "{{ deployment.id }}";
+    let currentStatus = "{{ status_str }}";
+    const logContainer = document.getElementById('log-container');
+    const statusDisplay = document.getElementById('status-display');
+    const actionButtons = document.getElementById('action-buttons');
+
+    function updateButtons(status) {
+        let buttonsHtml = '';
+        if (status === 'Pending') {
+            buttonsHtml = `<form method="POST" action="/deploy/${deploymentId}/delete" style="display:inline;">
+                <button type="submit" class="btn-delete">删除任务</button>
+            </form>`;
+        } else if (status === 'Failed') {
+            buttonsHtml = `<form method="POST" action="/deploy/${deploymentId}/retry" style="display:inline;">
+                <button type="submit" class="btn-retry">重试任务</button>
+            </form>`;
+        }
+        actionButtons.innerHTML = buttonsHtml;
+    }
+
+    // Only connect to WebSocket if deployment is running or pending
+    if (currentStatus === "Running" || currentStatus === "Pending") {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/deploy/${deploymentId}`);
+
+        ws.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+
+                // Handle status updates
+                if (data.type === "status") {
+                    currentStatus = data.status;
+                    // Update status display
+                    if (statusDisplay && data.status) {
+                        statusDisplay.textContent = data.status;
+                        statusDisplay.className = 'status ' + data.status;
+                    }
+                    // Update buttons based on new status
+                    updateButtons(data.status);
+                    return;
+                }
+
+                // Handle log entries - check if it's a log object
+                if (data.message && data.timestamp) {
+                    const entry = document.createElement("div");
+                    entry.className = `log-entry ${data.level || 'info'}`;
+                    const time = new Date(data.timestamp).toTimeString().split(' ')[0];
+                    entry.innerHTML = `<span class="log-timestamp">[${time}]</span> ${data.message}`;
+                    logContainer.appendChild(entry);
+                    logContainer.scrollTop = logContainer.scrollHeight;
+                }
+            } catch (e) {
+                console.error("Failed to parse message:", e);
+            }
+        };
+
+        ws.onclose = function() {
+            console.log("WebSocket connection closed");
+        };
+
+        ws.onerror = function(error) {
+            console.error("WebSocket error:", error);
+        };
+    }
+</script>
+{% endblock %}

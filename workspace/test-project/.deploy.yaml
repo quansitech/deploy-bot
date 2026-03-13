@@ -1,0 +1,8 @@
+repo_url = "https://github.com/example/test.git"
+branch = "main"
+project_type = "php"
+docker_service = "php"
+working_dir = "/app"
+install_command = "composer install"
+build_command = "php artisan migrate"
+env = { APP_ENV = "production" }

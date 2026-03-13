@@ -1,0 +1,163 @@
+//! Project configuration module
+//! 配置下沉到各项目目录的 .deploy.yaml
+
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+use crate::config::ProjectType;
+
+/// Project-level configuration loaded from .deploy.yaml
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ProjectConfig {
+    pub repo_url: String,
+    pub branch: String,
+    pub project_type: ProjectType,
+    pub docker_service: Option<String>,
+    pub working_dir: Option<String>,
+    pub install_command: Option<String>,
+    pub build_command: Option<String>,
+    pub extra_command: Option<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
+impl ProjectConfig {
+    /// Load project config from .deploy.yaml file
+    pub fn load_from_file(path: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let config: ProjectConfig = toml::from_str(&content)?;
+        Ok(config)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_project_config_load_full() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/example/test.git"
+branch = "main"
+project_type = "php"
+docker_service = "php"
+working_dir = "/app"
+install_command = "composer install"
+build_command = "php artisan migrate"
+env = {{ APP_ENV = "production", DB_HOST = "localhost" }}
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.repo_url, "https://github.com/example/test.git");
+        assert_eq!(config.branch, "main");
+        assert_eq!(config.project_type, ProjectType::Php);
+        assert_eq!(config.docker_service, Some("php".to_string()));
+        assert_eq!(config.working_dir, Some("/app".to_string()));
+        assert_eq!(config.install_command, Some("composer install".to_string()));
+        assert_eq!(config.build_command, Some("php artisan migrate".to_string()));
+        assert_eq!(config.extra_command, None);
+        assert_eq!(config.env.get("APP_ENV"), Some(&"production".to_string()));
+        assert_eq!(config.env.get("DB_HOST"), Some(&"localhost".to_string()));
+    }
+
+    #[test]
+    fn test_project_config_load_minimal() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/example/test.git"
+branch = "main"
+project_type = "nodejs"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.repo_url, "https://github.com/example/test.git");
+        assert_eq!(config.branch, "main");
+        assert_eq!(config.project_type, ProjectType::Nodejs);
+        assert_eq!(config.docker_service, None);
+        assert_eq!(config.working_dir, None);
+        assert_eq!(config.install_command, None);
+        assert_eq!(config.build_command, None);
+        assert_eq!(config.extra_command, None);
+        assert!(config.env.is_empty());
+    }
+
+    #[test]
+    fn test_project_config_load_all_project_types() {
+        let types = vec![
+            ("nodejs", ProjectType::Nodejs),
+            ("rust", ProjectType::Rust),
+            ("python", ProjectType::Python),
+            ("php", ProjectType::Php),
+            ("custom", ProjectType::Custom),
+        ];
+
+        for (type_str, expected) in types {
+            let mut file = NamedTempFile::new().unwrap();
+            writeln!(
+                file,
+                r#"
+repo_url = "https://github.com/test/test.git"
+branch = "main"
+project_type = "{}"
+"#,
+                type_str
+            )
+            .unwrap();
+            file.flush().unwrap();
+
+            let config = ProjectConfig::load_from_file(file.path()).unwrap();
+            assert_eq!(config.project_type, expected, "Failed for type: {}", type_str);
+        }
+    }
+
+    #[test]
+    fn test_project_config_load_file_not_found() {
+        let result = ProjectConfig::load_from_file(std::path::Path::new("/nonexistent/.deploy.yaml"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_project_config_load_no_spaces() {
+        // Test TOML parsing without spaces around =
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/example/test.git"
+branch = "main"
+project_type = "php"
+docker_service="workspace7.4"
+working_dir="/var/www/zgq"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.docker_service, Some("workspace7.4".to_string()));
+        assert_eq!(config.working_dir, Some("/var/www/zgq".to_string()));
+    }
+
+    #[test]
+    fn test_project_config_load_invalid_toml() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "invalid toml = =").unwrap();
+        file.flush().unwrap();
+
+        let result = ProjectConfig::load_from_file(file.path());
+        assert!(result.is_err());
+    }
+}

@@ -1,0 +1,19 @@
+# Deploy Bot Configuration
+# Copy this file to config.yaml and fill in your actual values
+
+[server]
+host = "0.0.0.0"
+port = 8080
+webhook_token = "your-webhook-token-here"
+log_dir = "./logs"
+workspace_dir = "./workspace"
+docker_compose_path = "./docker-compose.yaml"
+
+# Optional: GitHub webhook secret
+# github_secret = "your-github-secret"
+
+# Optional: GitLab webhook token
+# gitlab_token = "your-gitlab-token"
+
+# Optional: Alibaba Cloud Codeup webhook token
+# codeup_token = "your-codeup-token"

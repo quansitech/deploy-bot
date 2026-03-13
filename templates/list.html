@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h1>部署任务列表</h1>
+
+{% if deployments.is_empty() %}
+<p>暂无部署任务</p>
+{% else %}
+<table class="deployments">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>项目名称</th>
+            <th>分支</th>
+            <th>状态</th>
+            <th>创建时间</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for deployment in deployments %}
+        <tr>
+            <td><a href="/deploy/{{ deployment.id }}">{{ deployment.id }}</a></td>
+            <td>{{ deployment.project_name }}</td>
+            <td>{{ deployment.project.branch }}</td>
+            <td><span class="status {{ deployment.status }}">{{ deployment.status }}</span></td>
+            <td>{{ deployment.created_at_local() }}</td>
+            <td>
+                <a href="/deploy/{{ deployment.id }}">查看</a>
+                {% if deployment.status.to_string() == "Pending" %}
+                <form method="POST" action="/deploy/{{ deployment.id }}/delete" style="display:inline;">
+                    <button type="submit" class="btn-delete">删除</button>
+                </form>
+                {% endif %}
+                {% if deployment.status.to_string() == "Failed" %}
+                <form method="POST" action="/deploy/{{ deployment.id }}/retry" style="display:inline;">
+                    <button type="submit" class="btn-retry">重试</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+<p><a href="/">刷新</a></p>
+{% endblock %}
