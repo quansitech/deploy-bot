@@ -22,7 +22,6 @@
 [server]
 host = "0.0.0.0"
 port = 8080
-log_dir = "./logs"
 workspace_dir = "./workspace"
 docker_compose_path = "./docker-compose.yaml"
 
