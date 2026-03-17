@@ -15,6 +15,9 @@ use tracing::{error, info, warn};
 use crate::error::{AppError, AppResult};
 use crate::webhook::handler::WebhookAppState;
 
+/// Current version of the application (hardcoded for runtime access)
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Payload from GitHub release webhook
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ReleasePayload {
@@ -69,41 +72,10 @@ impl Version {
     }
 }
 
-/// Get current version from Cargo.toml
+/// Get current version from hardcoded constant
 pub fn get_current_version() -> AppResult<Version> {
-    // Read from Cargo.toml in the current executable's directory
-    let exe_path = std::env::current_exe()
-        .map_err(|e| AppError::Config(format!("Failed to get executable path: {e}")))?;
-
-    let cargo_toml_path = exe_path
-        .parent()
-        .ok_or_else(|| AppError::Config("Failed to get parent directory".to_string()))?
-        .join("Cargo.toml");
-
-    // Also try the source directory as fallback
-    let source_cargo_toml = PathBuf::from("Cargo.toml");
-
-    let content = if cargo_toml_path.exists() {
-        std::fs::read_to_string(&cargo_toml_path)
-            .map_err(|e| AppError::Config(format!("Failed to read Cargo.toml: {e}")))?
-    } else if source_cargo_toml.exists() {
-        std::fs::read_to_string(&source_cargo_toml)
-            .map_err(|e| AppError::Config(format!("Failed to read Cargo.toml: {e}")))?
-    } else {
-        return Err(AppError::Config("Cannot find Cargo.toml".to_string()));
-    };
-
-    // Parse version from Cargo.toml
-    let version_str = content
-        .lines()
-        .find(|line| line.starts_with("version = "))
-        .ok_or_else(|| AppError::Config("Version not found in Cargo.toml".to_string()))?
-        .split('"')
-        .nth(1)
-        .ok_or_else(|| AppError::Config("Invalid version format".to_string()))?;
-
-    Version::parse(version_str)
-        .ok_or_else(|| AppError::Config(format!("Failed to parse version: {version_str}")))
+    Version::parse(VERSION)
+        .ok_or_else(|| AppError::Config(format!("Failed to parse version: {VERSION}")))
 }
 
 /// Check if new version is greater than current version
@@ -115,12 +87,18 @@ pub fn is_newer_version(new_version: &str) -> AppResult<bool> {
     Ok(new.gt(&current))
 }
 
-/// Download binary from URL
+/// Download binary from URL (supports .tar.gz and raw binary)
 pub async fn download_binary(url: &str, version: &str) -> AppResult<PathBuf> {
     let temp_dir = std::env::temp_dir();
-    let binary_path = temp_dir.join(format!("deploy-bot-{}", version.replace('v', "")));
+    let is_tarball = url.ends_with(".tar.gz");
 
-    info!("Downloading new binary from {url} to {}", binary_path.display());
+    let download_path = if is_tarball {
+        temp_dir.join(format!("deploy-bot-{}.tar.gz", version.replace('v', "")))
+    } else {
+        temp_dir.join(format!("deploy-bot-{}", version.replace('v', "")))
+    };
+
+    info!("Downloading new binary from {url} to {}", download_path.display());
 
     let client = reqwest::Client::new();
     let response = client
@@ -137,7 +115,7 @@ pub async fn download_binary(url: &str, version: &str) -> AppResult<PathBuf> {
     }
 
     // Stream download to file
-    let mut file = tokio::fs::File::create(&binary_path)
+    let mut file = tokio::fs::File::create(&download_path)
         .await
         .map_err(|e| AppError::Config(format!("Failed to create temp file: {e}")))?;
 
@@ -153,6 +131,33 @@ pub async fn download_binary(url: &str, version: &str) -> AppResult<PathBuf> {
     file.flush()
         .await
         .map_err(|e| AppError::Config(format!("Flush error: {e}")))?;
+
+    // Extract tarball if needed
+    let binary_path = if is_tarball {
+        info!("Extracting tarball...");
+        let output = std::process::Command::new("tar")
+            .args(["-xzf", &download_path.to_string_lossy(), "-C", &temp_dir.to_string_lossy()])
+            .output()
+            .map_err(|e| AppError::Config(format!("Failed to extract tarball: {e}")))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(AppError::Config(format!("Failed to extract tarball: {stderr}")));
+        }
+
+        // Find the extracted binary (assuming it's named "deploy-bot")
+        let extracted_binary = temp_dir.join("deploy-bot");
+        if !extracted_binary.exists() {
+            return Err(AppError::Config("Extracted binary not found".to_string()));
+        }
+
+        // Remove the tarball
+        tokio::fs::remove_file(&download_path).await.ok();
+
+        extracted_binary
+    } else {
+        download_path
+    };
 
     // Make executable
     #[cfg(unix)]
@@ -183,6 +188,12 @@ pub fn execute_update_script(script_path: &str, new_binary_path: &Path) -> AppRe
         .arg(new_binary_path.to_str().unwrap_or(""))
         .output()
         .map_err(|e| AppError::Config(format!("Failed to execute update script: {e}")))?;
+
+    // Log stdout output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.is_empty() {
+        info!("Update script stdout: {}", stdout);
+    }
 
     if output.status.success() {
         info!("Update script executed successfully");
@@ -281,14 +292,23 @@ pub async fn handle_self_update(
         .as_ref()
         .ok_or_else(|| AppError::Config("Update script not configured".to_string()))?;
 
+    // Log before spawning thread (logs will be lost after process is stopped)
+    info!(
+        "About to execute update script: {} with binary: {}",
+        script_path,
+        binary_path.display()
+    );
+
     // Execute in a spawned thread to allow the current process to be stopped
     let script_path_owned = script_path.to_string();
     let binary_path_owned = binary_path.clone();
 
     // Spawn a thread to run the update (so we can return a response before the process is killed)
+    // Note: After the process is stopped, this thread's logs won't be captured
     std::thread::spawn(move || {
+        // Note: logging here may not work after parent process is stopped
         if let Err(e) = execute_update_script(&script_path_owned, &binary_path_owned) {
-            error!("Update failed: {e}");
+            eprintln!("Update failed: {e}"); // Print to stderr as fallback
         }
     });
 
