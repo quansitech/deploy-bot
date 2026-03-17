@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use uuid::Uuid;
@@ -75,17 +75,19 @@ pub struct DeploymentManager {
     queue: Arc<Mutex<VecDeque<Deployment>>>,
     db: Arc<Database>,
     log_sender: broadcast::Sender<String>,
+    workspace_dir: String,
 }
 
 impl DeploymentManager {
     /// Create a new deployment manager with SQLite persistence
-    pub fn new<P: AsRef<Path>>(db_path: P) -> anyhow::Result<Self> {
+    pub fn new<P: AsRef<Path>>(db_path: P, workspace_dir: String) -> anyhow::Result<Self> {
         let db = Arc::new(Database::new(db_path)?);
         let (log_sender, _) = broadcast::channel(1000);
         Ok(Self {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             db,
             log_sender,
+            workspace_dir,
         })
     }
 
@@ -322,15 +324,31 @@ impl DeploymentManager {
         }
         drop(queue);
 
-        // Check database
+        // Check database - get project_name for config reload
         if let Ok(Some(deployment)) = self.db.get_deployment(id) {
             if deployment.status == DeploymentStatus::Failed {
-                // Re-add to queue
+                // 2.1 Get project_name from database
+                let project_name = deployment.project_name.clone();
+
+                // 2.2 & 2.3: Load config from file
+                let config_path = PathBuf::from(&self.workspace_dir)
+                    .join(&project_name)
+                    .join(".deploy.yaml");
+
+                let project = match ProjectConfig::load_from_file(&config_path) {
+                    Ok(config) => config,
+                    Err(e) => {
+                        tracing::error!("Failed to load config from {:?}: {}", config_path, e);
+                        return false;
+                    }
+                };
+
+                // 2.4: Create new deployment with fresh config
                 let mut queue = self.queue.lock();
                 let new_deployment = Deployment {
                     id: deployment.id.clone(),
-                    project_name: deployment.project_name.clone(),
-                    project: deployment.project,
+                    project_name,
+                    project,
                     status: DeploymentStatus::Pending,
                     created_at: Utc::now(),
                     started_at: None,
@@ -339,7 +357,7 @@ impl DeploymentManager {
                 queue.push_back(new_deployment);
                 drop(queue);
 
-                // Update database
+                // 2.5: Update database
                 let _ = self.db.update_deployment_status(id, &DeploymentStatus::Pending, None, None);
                 return true;
             }
@@ -385,6 +403,7 @@ impl Default for DeploymentManager {
             queue: Arc::new(Mutex::new(VecDeque::new())),
             db: Arc::new(Database::new(":memory:").expect("Failed to create in-memory DB")),
             log_sender,
+            workspace_dir: String::new(),
         }
     }
 }
@@ -406,6 +425,7 @@ mod tests {
             install_command: Some("composer install".to_string()),
             build_command: Some("php artisan migrate".to_string()),
             extra_command: None,
+            run_user: None,
             env: HashMap::new(),
         }
     }
@@ -415,7 +435,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let queue = manager.queue.lock();
         assert!(queue.is_empty());
     }
@@ -425,7 +445,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let project = create_test_project_config();
 
         let id = manager.queue_deployment("test-project".to_string(), project);
@@ -441,7 +461,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let project = create_test_project_config();
 
         let id = manager.queue_deployment("test-project".to_string(), project).unwrap();
@@ -458,7 +478,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let project = create_test_project_config();
 
         let id = manager.queue_deployment("test-project".to_string(), project).unwrap();
@@ -473,7 +493,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let project = create_test_project_config();
 
         let id = manager.queue_deployment("test-project".to_string(), project).unwrap();
@@ -488,7 +508,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let project = create_test_project_config();
 
         let id = manager.queue_deployment("test-project".to_string(), project).unwrap();
@@ -506,7 +526,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
 
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
         let project = create_test_project_config();
 
         let id = manager.queue_deployment("test-project".to_string(), project).unwrap();

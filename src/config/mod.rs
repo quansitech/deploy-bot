@@ -19,6 +19,8 @@ pub struct ServerConfig {
     pub log_dir: String,
     pub workspace_dir: String,
     pub docker_compose_path: Option<String>,
+    /// Detected docker compose command (None if docker_compose_path is not set)
+    pub docker_compose_command: Option<DockerComposeCommand>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -29,6 +31,66 @@ pub enum ProjectType {
     Python,
     Php,
     Custom,
+}
+
+/// Docker Compose command type
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+pub enum DockerComposeCommand {
+    /// docker compose (new version, Docker 19.03+)
+    DockerCompose,
+    /// docker-compose (legacy standalone command)
+    DockerComposeLegacy,
+}
+
+impl DockerComposeCommand {
+    /// Detect available docker compose command
+    /// Returns None if docker_compose_path is not set
+    pub fn detect(docker_compose_path: &Option<String>) -> Option<Self> {
+        if docker_compose_path.is_none() {
+            return None;
+        }
+
+        // Try docker compose first (new version)
+        // Check output contains version number (not help text)
+        let output = std::process::Command::new("docker")
+            .args(["compose", "version"])
+            .output();
+
+        if let Ok(output) = output {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let combined = format!("{stdout}{stderr}");
+
+            // Check if output contains version info (e.g., "v2.x.x" or "Docker Compose version v2")
+            // NOT the help text which says "Usage: docker [OPTIONS] COMMAND"
+            if !combined.contains("Usage:") && !combined.contains("docker --help")
+                && (combined.contains("Compose") || combined.contains("v2") || combined.contains("v1"))
+            {
+                tracing::info!("Detected docker compose command: docker compose (output: {})", stdout.trim());
+                return Some(DockerComposeCommand::DockerCompose);
+            }
+        }
+
+        // Fallback to docker-compose (legacy version)
+        let output = std::process::Command::new("docker-compose")
+            .arg("--version")
+            .output();
+
+        if let Ok(output) = output {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Check for version pattern like v1.x.x or v2.x.x
+            let version_regex = regex::Regex::new(r"v\d+\.\d+\.\d+").ok();
+            let has_version = version_regex.map(|r| r.is_match(&stdout)).unwrap_or(false);
+            if output.status.success() && (stdout.contains("Compose") || has_version) {
+                tracing::info!("Detected docker compose command: docker-compose (legacy)");
+                return Some(DockerComposeCommand::DockerComposeLegacy);
+            }
+        }
+
+        // Neither is available - log warning
+        tracing::warn!("No docker compose command available (tried 'docker compose' and 'docker-compose')");
+        None
+    }
 }
 
 impl fmt::Display for ProjectType {
@@ -46,7 +108,12 @@ impl fmt::Display for ProjectType {
 impl Config {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
-        let config: Config = toml::from_str(&content)?;
+        let mut config: Config = toml::from_str(&content)?;
+
+        // Detect docker compose command if docker_compose_path is set
+        config.server.docker_compose_command =
+            DockerComposeCommand::detect(&config.server.docker_compose_path);
+
         Ok(config)
     }
 }

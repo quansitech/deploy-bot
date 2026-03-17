@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 
-use crate::config::ProjectType;
+use crate::config::{DockerComposeCommand, ProjectType};
 use crate::error::AppError;
 
 /// Log callback type for real-time log streaming
@@ -48,8 +48,10 @@ pub async fn install_dependencies(
     custom_command: Option<&str>,
     env_vars: &std::collections::HashMap<String, String>,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
     log_callback: Option<LogCallback>,
 ) -> Result<String, AppError> {
     tracing::info!("install_dependencies called: custom_command={:?}, docker_service={:?}", custom_command, docker_service);
@@ -61,8 +63,10 @@ pub async fn install_dependencies(
             cmd,
             env_vars,
             docker_compose_path,
+            docker_compose_command,
             docker_service,
             working_dir,
+            run_user,
             log_callback,
         )
         .await;
@@ -70,26 +74,29 @@ pub async fn install_dependencies(
 
     match project_type {
         ProjectType::Nodejs => {
-            install_nodejs(project_dir, env_vars, docker_compose_path, docker_service, working_dir, log_callback).await
+            install_nodejs(project_dir, env_vars, docker_compose_path, docker_compose_command, docker_service, working_dir, run_user, log_callback).await
         }
         ProjectType::Rust => install_rust(project_dir).await,
         ProjectType::Python => {
-            install_python(project_dir, docker_compose_path, docker_service, working_dir, log_callback).await
+            install_python(project_dir, docker_compose_path, docker_compose_command, docker_service, working_dir, run_user, log_callback).await
         }
         ProjectType::Php => {
-            install_php(project_dir, docker_compose_path, docker_service, working_dir, log_callback).await
+            install_php(project_dir, docker_compose_path, docker_compose_command, docker_service, working_dir, run_user, log_callback).await
         }
         ProjectType::Custom => Ok(String::new()), // No-op for custom
     }
 }
 
 /// Install Node.js dependencies
+#[allow(clippy::too_many_arguments)]
 async fn install_nodejs(
     project_dir: &Path,
     env_vars: &std::collections::HashMap<String, String>,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
     log_callback: Option<LogCallback>,
 ) -> Result<String, AppError> {
     // Try yarn first, then npm
@@ -104,7 +111,7 @@ async fn install_nodejs(
         "npm install"
     };
 
-    run_command(project_dir, command, env_vars, docker_compose_path, docker_service, working_dir, log_callback).await
+    run_command(project_dir, command, env_vars, docker_compose_path, docker_compose_command, docker_service, working_dir, run_user, log_callback).await
 }
 
 /// Install Rust dependencies
@@ -118,8 +125,10 @@ async fn install_rust(_project_dir: &Path) -> Result<String, AppError> {
 async fn install_python(
     project_dir: &Path,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
     log_callback: Option<LogCallback>,
 ) -> Result<String, AppError> {
     // Check for poetry first
@@ -129,8 +138,10 @@ async fn install_python(
             "poetry install",
             &std::collections::HashMap::new(),
             docker_compose_path,
+            docker_compose_command,
             docker_service,
             working_dir,
+            run_user,
             log_callback,
         )
         .await;
@@ -143,8 +154,10 @@ async fn install_python(
             "pip install -r requirements.txt",
             &std::collections::HashMap::new(),
             docker_compose_path,
+            docker_compose_command,
             docker_service,
             working_dir,
+            run_user,
             log_callback,
         )
         .await;
@@ -157,8 +170,10 @@ async fn install_python(
 async fn install_php(
     project_dir: &Path,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
     log_callback: Option<LogCallback>,
 ) -> Result<String, AppError> {
     run_command(
@@ -166,28 +181,67 @@ async fn install_php(
         "composer install --no-dev",
         &std::collections::HashMap::new(),
         docker_compose_path,
+        docker_compose_command,
         docker_service,
         working_dir,
+        run_user,
         log_callback,
     )
     .await
 }
 
+/// Get UID and GID for a username
+fn get_uid_gid(username: &str) -> Result<(u32, u32), AppError> {
+    let uid = Command::new("id")
+        .arg("-u")
+        .arg(username)
+        .output()
+        .map_err(|e| AppError::Deployment(format!("Failed to get UID for user '{username}': {e}")))?;
+
+    if !uid.status.success() {
+        return Err(AppError::Deployment(format!("User '{username}' does not exist on host")));
+    }
+
+    let uid_binding = String::from_utf8_lossy(&uid.stdout);
+    let uid_str = uid_binding.trim();
+    let uid_val: u32 = uid_str.parse().map_err(|e| AppError::Deployment(format!("Invalid UID for user '{username}': {e}")))?;
+
+    let gid = Command::new("id")
+        .arg("-g")
+        .arg(username)
+        .output()
+        .map_err(|e| AppError::Deployment(format!("Failed to get GID for user '{username}': {e}")))?;
+
+    if !gid.status.success() {
+        return Err(AppError::Deployment(format!("User '{username}' does not exist on host")));
+    }
+
+    let gid_binding = String::from_utf8_lossy(&gid.stdout);
+    let gid_str = gid_binding.trim();
+    let gid_val: u32 = gid_str.parse().map_err(|e| AppError::Deployment(format!("Invalid GID for user '{username}': {e}")))?;
+
+    Ok((uid_val, gid_val))
+}
+
 /// Run a shell command
 /// Returns the combined stdout/stderr output
+#[allow(clippy::too_many_arguments)]
 pub async fn run_command(
     project_dir: &Path,
     command: &str,
     env_vars: &std::collections::HashMap<String, String>,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
     log_callback: Option<LogCallback>,
 ) -> Result<String, AppError> {
     let project_dir_clone = project_dir.to_path_buf();
     let command = command.to_string();
+    let run_user = run_user.map(String::from);
 
-    tracing::info!("run_command - docker_compose_path: {:?}, docker_service: {:?}", docker_compose_path, docker_service);
+    tracing::info!("run_command - docker_compose_path: {:?}, docker_compose_command: {:?}, docker_service: {:?}, run_user: {:?}", docker_compose_path, docker_compose_command, docker_service, run_user);
 
     // If docker_service is specified: only use project-defined env vars (don't pass host env vars)
     // This prevents host PATH from overriding container's PATH
@@ -207,22 +261,41 @@ pub async fn run_command(
 
     // If docker_service is specified, use docker compose run
     if let (Some(service), Some(compose_path)) = (docker_service, docker_compose_path) {
+        // Get user info for docker run
+        let docker_user = if let Some(ref user) = run_user {
+            let (uid, gid) = get_uid_gid(user)?;
+            Some(format!("{uid}:{gid}"))
+        } else {
+            None
+        };
+
         return run_docker_compose(
             project_dir,
             compose_path,
+            docker_compose_command,
             service,
             working_dir,
             &command,
             &env,
+            docker_user,
             log_callback,
         )
         .await;
     }
 
+    // Non-Docker mode: use sudo to switch user if specified
+    let final_command = if let Some(ref user) = run_user {
+        // Validate user exists before running
+        let _ = get_uid_gid(user)?;
+        format!("sudo -u {user} {command}")
+    } else {
+        command.clone()
+    };
+
     // Otherwise, run command directly
     tokio::task::spawn_blocking(move || {
         // Parse command
-        let parts: Vec<&str> = command.split_whitespace().collect();
+        let parts: Vec<&str> = final_command.split_whitespace().collect();
         if parts.is_empty() {
             return Err(AppError::Deployment("Empty command".to_string()));
         }
@@ -239,16 +312,16 @@ pub async fn run_command(
 
         if !output.status.success() {
             return Err(AppError::Deployment(format!(
-                "Command failed: {command}\nstdout: {stdout}\nstderr: {stderr}"
+                "Command failed: {final_command}\nstdout: {stdout}\nstderr: {stderr}"
             )));
         }
 
         // Log output on success
         let output_str = if !stdout.is_empty() {
-            tracing::info!("{} output: {}", command, stdout);
+            tracing::info!("{} output: {}", final_command, stdout);
             stdout.to_string()
         } else if !stderr.is_empty() {
-            tracing::info!("{} stderr: {}", command, stderr);
+            tracing::info!("{} stderr: {}", final_command, stderr);
             stderr.to_string()
         } else {
             String::new()
@@ -262,17 +335,20 @@ pub async fn run_command(
 
 /// Run command via docker compose with real-time log streaming
 /// Returns the combined stdout/stderr output
+#[allow(clippy::too_many_arguments)]
 async fn run_docker_compose(
     project_dir: &Path,
     docker_compose_path: &str,
+    docker_compose_command: Option<DockerComposeCommand>,
     service: &str,
     working_dir: Option<&str>,
     command: &str,
     env: &std::collections::HashMap<String, String>,
+    docker_user: Option<String>,
     log_callback: Option<LogCallback>,
 ) -> Result<String, AppError> {
-    tracing::info!("run_docker_compose called: docker_compose_path={}, service={}, command={}, working_dir={:?}",
-        docker_compose_path, service, command, working_dir);
+    tracing::info!("run_docker_compose called: docker_compose_path={}, docker_compose_command={:?}, service={}, command={}, working_dir={:?}, docker_user={:?}",
+        docker_compose_path, docker_compose_command, service, command, working_dir, docker_user);
 
     let project_dir_clone = project_dir.to_path_buf();
     let docker_compose_path = docker_compose_path.to_string();
@@ -284,16 +360,45 @@ async fn run_docker_compose(
     // Clone env to move into the blocking task
     let env_vars = env.clone();
 
-    tracing::info!("Running docker compose: command={}, working_dir={:?}", command_for_error, working_dir);
+    // Determine which command to use based on detected docker compose command
+    let (docker_cmd, compose_args) = match docker_compose_command {
+        Some(DockerComposeCommand::DockerCompose) => {
+            // docker compose (new version)
+            tracing::info!("Using docker compose command: docker compose");
+            ("docker", vec!["compose"])
+        }
+        Some(DockerComposeCommand::DockerComposeLegacy) => {
+            // docker-compose (legacy version)
+            tracing::info!("Using docker compose command: docker-compose (legacy)");
+            ("docker-compose", vec![])
+        }
+        None => {
+            // Fallback to default (shouldn't happen, but be safe)
+            tracing::warn!("No docker_compose_command detected, defaulting to docker compose");
+            ("docker", vec!["compose"])
+        }
+    };
+
+    tracing::info!("Running docker compose: docker_cmd={}, compose_args={:?}, docker_compose_path={}, command={}, working_dir={:?}, docker_user={:?}",
+        docker_cmd, compose_args, docker_compose_path, command_for_error, working_dir, docker_user);
 
     // Run docker compose and capture output directly (not in detached mode)
     // This allows us to get the logs in real-time
     let output = tokio::task::spawn_blocking(move || {
-        let mut cmd = Command::new("docker");
-        cmd.args(["compose", "-f", &docker_compose_path, "run", "--rm"]);
+        let mut cmd = Command::new(docker_cmd);
+        // Add compose subcommand if using "docker compose"
+        for arg in &compose_args {
+            cmd.arg(arg);
+        }
+        cmd.args(["-f", &docker_compose_path, "run", "--rm"]);
 
         if let Some(ref wd) = working_dir {
             cmd.args(["-w", wd]);
+        }
+
+        // Add user if specified
+        if let Some(ref user) = docker_user {
+            cmd.args(["-u", user]);
         }
 
         cmd.arg(&service);
@@ -443,6 +548,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         ).await;
 
         assert!(result.is_err());
@@ -463,8 +570,10 @@ mod tests {
                 Some("npm install"),
                 &std::collections::HashMap::new(),
                 Some("./docker-compose.yaml"),  // docker_compose_path
+                Some(DockerComposeCommand::DockerCompose),  // docker_compose_command
                 Some("node"),                     // docker_service
                 None,                            // working_dir
+                None,                            // run_user
                 None,                            // log_callback
             )
         );
@@ -489,8 +598,10 @@ mod tests {
                 None,               // custom_command = None - uses built-in!
                 &std::collections::HashMap::new(),
                 Some("./docker-compose.yaml"),
+                Some(DockerComposeCommand::DockerCompose),
                 Some("php"),
                 None,
+                None,               // run_user
                 None,               // log_callback
             )
         );
@@ -510,8 +621,10 @@ mod tests {
                 "echo test",
                 &std::collections::HashMap::new(),
                 None,  // docker_compose_path = None
+                None,  // docker_compose_command = None
                 None,  // docker_service = None
                 None,  // working_dir = None
+                None,  // run_user = None
                 None,  // log_callback
             )
         );
@@ -531,8 +644,10 @@ mod tests {
                 "echo test",
                 &std::collections::HashMap::new(),
                 Some("./docker-compose.yaml"),  // docker_compose_path = Some
+                Some(DockerComposeCommand::DockerCompose),  // docker_compose_command
                 Some("node"),                     // docker_service = Some
                 None,                            // working_dir = None
+                None,                            // run_user = None
                 None,                            // log_callback
             )
         );

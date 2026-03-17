@@ -41,6 +41,9 @@ refinery = { version = "0.9", features = ["rusqlite-bundled"] }
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
+# Regex
+regex = "1"
+
 # WebSocket
 tokio-tungstenite = "0.21"
 futures-util = "0.3"

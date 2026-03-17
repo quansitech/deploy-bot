@@ -24,7 +24,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tokio::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::deploy::{DeploymentManager, executor};
 use crate::webhook::handler::WebhookAppState;
@@ -49,14 +49,35 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Load configuration
-    let config = config::Config::load("config.yaml")
+    // Load configuration from the executable's directory
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Failed to get executable path: {e}"))?
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Failed to get executable directory"))?
+        .to_path_buf();
+    let config_path = exe_dir.join("config.yaml");
+    let config = config::Config::load(config_path.to_str().unwrap())
         .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
 
-    let config = Arc::new(config);
-
-    // Initialize logging
+    // Initialize logging first
     let _guard = logging::init(std::path::PathBuf::from(&config.server.log_dir));
+
+    // Log detected docker compose command (after logging is initialized)
+    match &config.server.docker_compose_command {
+        Some(config::DockerComposeCommand::DockerCompose) => {
+            info!("Docker compose command: docker compose (detected)");
+        }
+        Some(config::DockerComposeCommand::DockerComposeLegacy) => {
+            info!("Docker compose command: docker-compose (legacy, detected)");
+        }
+        None => {
+            if config.server.docker_compose_path.is_some() {
+                warn!("Docker compose path configured but no docker compose command detected!");
+            }
+        }
+    }
+
+    let config = Arc::new(config);
 
     info!("Starting Deploy Bot v{}", env!("CARGO_PKG_VERSION"));
 
@@ -65,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&db_dir).ok();
     let db_path = db_dir.join("deployments.db");
     let deployment_manager = Arc::new(
-        DeploymentManager::new(&db_path)
+        DeploymentManager::new(&db_path, config.server.workspace_dir.clone())
             .map_err(|e| anyhow::anyhow!("Failed to initialize database: {e}"))?
     );
 
@@ -81,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
     let worker_deployment_manager = deployment_manager.clone();
     let worker_workspace_dir = config.server.workspace_dir.clone();
     let worker_docker_compose_path = config.server.docker_compose_path.clone();
+    let worker_docker_compose_command = config.server.docker_compose_command;
     tokio::spawn(async move {
         info!("Deployment worker started");
         loop {
@@ -90,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
                     task,
                     &worker_workspace_dir,
                     worker_docker_compose_path.as_deref(),
+                    worker_docker_compose_command,
                     worker_deployment_manager.clone(),
                 ).await;
             } else {

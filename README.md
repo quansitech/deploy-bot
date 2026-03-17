@@ -32,6 +32,51 @@ docker_compose_path = "./docker-compose.yaml"
 # codeup_token = "your-codeup-token"
 ```
 
+## 服务配置说明 (config.yaml)
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| host | 是 | 服务监听地址 |
+| port | 是 | 服务监听端口 |
+| webhook_token | 是 | Webhook 认证 Token |
+| log_dir | 是 | 日志保存目录 |
+| workspace_dir | 是 | 工作空间目录（存放项目代码） |
+| docker_compose_path | 否 | Docker Compose 文件路径 |
+| github_secret | 否 | GitHub Webhook 签名密钥 |
+| gitlab_token | 否 | GitLab Webhook Token |
+| codeup_token | 否 | 阿里云 Codeup Webhook Token |
+
+### 字段详细说明
+
+#### docker_compose_path
+Docker Compose 文件路径。设置后，支持使用 Docker 容器执行安装和构建命令。
+
+```yaml
+docker_compose_path = "./docker-compose.yaml"  # 使用 Docker Compose
+# docker_compose_path = null                  # 不使用 Docker，在宿主机执行
+```
+
+**使用条件：**
+1. 服务器已安装 Docker
+2. Docker Compose 文件存在（通常为 `docker-compose.yaml` 或 `docker-compose.yml`）
+3. 项目配置中指定了 `docker_service`
+
+**自动检测：**
+程序启动时会自动检测可用的 Docker Compose 命令：
+- 优先使用 `docker compose`（Docker 19.03+ 子命令）
+- 若不可用，则使用 `docker-compose`（旧版本独立命令）
+
+这确保了与不同版本 Docker 的兼容性。
+
+#### github_secret
+GitHub Webhook 签名验证密钥。当仓库配置 Webhook 时，需要设置此值来验证请求来源。
+
+#### gitlab_token
+GitLab Webhook Token。用于验证 GitLab Webhook 请求。
+
+#### codeup_token
+阿里云 Codeup Webhook Token。用于验证阿里云 Codeup Webhook 请求。
+
 ### 2. 配置项目
 
 在项目工作目录（如 `./workspace/my-project/`）下创建 `.deploy.yaml`：
@@ -41,7 +86,8 @@ repo_url = "https://github.com/username/repo.git"
 branch = "main"
 project_type = "nodejs"
 # docker_service = "php"        # 可选：使用 Docker 容器执行命令
-# working_dir = "/app"           # 可选：命令执行目录
+# working_dir = "/app"          # 可选：命令执行目录
+# run_user = "www-data"        # 可选：运行命令的用户
 # install_command = "npm install"
 # build_command = "npm run build"
 # env = { NODE_ENV = "production" }
@@ -82,6 +128,7 @@ curl -X POST http://localhost:8080/webhook/my-project \
 | project_type | 是 | 项目类型：nodejs/rust/python/php/custom |
 | docker_service | 否 | Docker 服务名称，配合 docker-compose 使用 |
 | working_dir | 否 | 命令执行的工作目录 |
+| run_user | 否 | 运行命令的用户（如 www-data、nginx） |
 | install_command | 否 | 自定义安装命令 |
 | build_command | 否 | 自定义构建命令 |
 | env | 否 | 环境变量（键值对） |
@@ -99,6 +146,20 @@ docker_service = "php"  # 使用 docker-compose.yml 中定义的 php 服务
 ```yaml
 working_dir = "/app"  # 在仓库的 app 子目录中执行命令
 ```
+
+#### run_user
+指定运行命令的用户。未指定时使用当前进程用户。
+
+- **非 Docker 环境**：使用 `sudo -u <user>` 切换用户执行命令
+- **Docker 环境**：使用 `docker run --user <uid>:<gid>` 参数在容器内切换用户
+
+```yaml
+run_user = "www-data"  # 以 www-data 用户身份执行命令
+```
+
+使用此功能需要：
+1. 部署服务器上存在指定的用户
+2. 部署进程用户有 sudo 权限（无密码 sudo 更佳）
 
 #### env
 环境变量，在执行安装和构建命令时注入到当前环境。
@@ -145,4 +206,4 @@ Response:
 cargo build --release
 ```
 
-构建产物位于 `target/release/deploy-bot`
+构建产物位于 `target/x86_64-unknow-linux-gnu/release/deploy-bot`

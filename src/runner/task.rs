@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::config::ProjectType;
+use crate::config::{DockerComposeCommand, ProjectType};
 use crate::error::AppError;
 use crate::installer::tasks;
 
@@ -16,8 +16,10 @@ pub async fn run_build(
     custom_command: Option<&str>,
     env_vars: &std::collections::HashMap<String, String>,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
 ) -> Result<String, AppError> {
     // Use custom command if provided
     if let Some(cmd) = custom_command {
@@ -26,8 +28,10 @@ pub async fn run_build(
             cmd,
             env_vars,
             docker_compose_path,
+            docker_compose_command,
             docker_service,
             working_dir,
+            run_user,
             None,
         )
         .await;
@@ -40,14 +44,16 @@ pub async fn run_build(
                 "npm run build",
                 env_vars,
                 docker_compose_path,
+                docker_compose_command,
                 docker_service,
                 working_dir,
+                run_user,
                 None,
             ).await
         }
-        ProjectType::Rust => build_rust(project_dir).await,
+        ProjectType::Rust => build_rust(project_dir, run_user).await,
         ProjectType::Python => {
-            build_python(project_dir, docker_compose_path, docker_service, working_dir).await
+            build_python(project_dir, docker_compose_path, docker_compose_command, docker_service, working_dir, run_user).await
         }
         ProjectType::Php => {
             Ok(String::new()) // PHP doesn't need build
@@ -57,7 +63,7 @@ pub async fn run_build(
 }
 
 /// Build Rust project
-async fn build_rust(project_dir: &Path) -> Result<String, AppError> {
+async fn build_rust(project_dir: &Path, _run_user: Option<&str>) -> Result<String, AppError> {
     let project_dir_clone = project_dir.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let output = Command::new("cargo")
@@ -84,8 +90,10 @@ async fn build_rust(project_dir: &Path) -> Result<String, AppError> {
 async fn build_python(
     project_dir: &Path,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
 ) -> Result<String, AppError> {
     // Check for setup.py
     if project_dir.join("setup.py").exists() {
@@ -94,8 +102,10 @@ async fn build_python(
             "python setup.py bdist_wheel",
             &std::collections::HashMap::new(),
             docker_compose_path,
+            docker_compose_command,
             docker_service,
             working_dir,
+            run_user,
             None,
         )
         .await;
@@ -108,8 +118,10 @@ async fn build_python(
             "python -m build",
             &std::collections::HashMap::new(),
             docker_compose_path,
+            docker_compose_command,
             docker_service,
             working_dir,
+            run_user,
             None,
         )
         .await;
@@ -127,16 +139,20 @@ pub async fn run_command(
     command: &str,
     env_vars: &std::collections::HashMap<String, String>,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
+    run_user: Option<&str>,
 ) -> Result<String, AppError> {
     tasks::run_command(
         project_dir,
         command,
         env_vars,
         docker_compose_path,
+        docker_compose_command,
         docker_service,
         working_dir,
+        run_user,
         None,
     )
     .await
@@ -161,6 +177,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
         );
 
@@ -182,6 +200,8 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
+                None,
             )
         );
 
@@ -197,6 +217,8 @@ mod tests {
                 temp_dir.path(),
                 "",
                 &std::collections::HashMap::new(),
+                None,
+                None,
                 None,
                 None,
                 None,

@@ -23,6 +23,9 @@
     <div class="detail-label">项目类型</div>
     <div>{{ deployment.project.project_type }}</div>
 
+    <div class="detail-label">运行用户</div>
+    <div>{% match deployment.project.run_user %}{% when Some with (u) %}{{ u }}{% when None %}默认{% endmatch %}</div>
+
     <div class="detail-label">状态</div>
     <div><span id="status-display" class="status {{ status_str }}">{{ status_str }}</span></div>
 

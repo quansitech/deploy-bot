@@ -40,7 +40,9 @@ pub async fn pull_repo(
     target_dir: PathBuf,
     branch: String,
     ssh_key: Option<String>,
+    run_user: Option<&str>,
 ) -> Result<(), AppError> {
+    let run_user = run_user.map(String::from);
     tokio::task::spawn_blocking(move || {
         // Setup SSH key if provided
         if let Some(ref key_path) = ssh_key {
@@ -55,14 +57,14 @@ pub async fn pull_repo(
             // Check if directory is empty (only has .deploy.yaml or hidden files)
             if is_directory_empty(&target_dir)? {
                 // Empty directory - use git clone to current dir
-                clone_to_current_dir(&target_dir, &repo_url, &branch)
+                clone_to_current_dir(&target_dir, &repo_url, &branch, run_user.as_deref())
             } else {
                 // Non-empty directory - fetch and checkout
-                fetch_and_checkout(&target_dir, &branch)
+                fetch_and_checkout(&target_dir, &branch, run_user.as_deref())
             }
         } else {
             // Directory doesn't exist - clone to new directory
-            clone_repo(&target_dir, &repo_url, &branch)
+            clone_repo(&target_dir, &repo_url, &branch, run_user.as_deref())
         }
     })
     .await
@@ -71,16 +73,23 @@ pub async fn pull_repo(
 
 /// Clone repository
 #[allow(dead_code)]
-fn clone_repo(target_dir: &Path, repo_url: &str, branch: &str) -> Result<(), AppError> {
-    // Create parent directory
+fn clone_repo(target_dir: &Path, repo_url: &str, branch: &str, run_user: Option<&str>) -> Result<(), AppError> {
+    // Create parent directory (need permissions)
     if let Some(parent) = target_dir.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| AppError::Git(format!("Failed to create directory: {e}")))?;
     }
 
-    let output = Command::new("git")
-        .args(["clone", "--branch", branch, "--depth", "1", repo_url])
-        .arg(target_dir)
+    // Build git clone command
+    let git_cmd = if let Some(user) = run_user {
+        format!("sudo -u {} git clone --branch {} --depth 1 {} {}", user, branch, repo_url, target_dir.display())
+    } else {
+        format!("git clone --branch {branch} --depth 1 {repo_url} {}", target_dir.display())
+    };
+
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(&git_cmd)
         .output()
         .map_err(|e| AppError::Git(format!("Failed to run git clone: {e}")))?;
 
@@ -94,7 +103,7 @@ fn clone_repo(target_dir: &Path, repo_url: &str, branch: &str) -> Result<(), App
 
 /// Clone repository to current directory (for empty directories)
 #[allow(dead_code)]
-fn clone_to_current_dir(target_dir: &Path, repo_url: &str, branch: &str) -> Result<(), AppError> {
+fn clone_to_current_dir(target_dir: &Path, repo_url: &str, branch: &str, run_user: Option<&str>) -> Result<(), AppError> {
     // Ensure directory exists
     if !target_dir.exists() {
         std::fs::create_dir_all(target_dir)
@@ -114,9 +123,16 @@ fn clone_to_current_dir(target_dir: &Path, repo_url: &str, branch: &str) -> Resu
 
     // Try to clone, restore .deploy.yaml on failure
     let clone_result = (|| {
-        let output = Command::new("git")
+        let git_cmd = if let Some(user) = run_user {
+            format!("sudo -u {user} git clone --branch {branch} --depth 1 -- {repo_url} .")
+        } else {
+            format!("git clone --branch {branch} --depth 1 -- {repo_url} .")
+        };
+
+        let output = Command::new("sh")
             .current_dir(target_dir)
-            .args(["clone", "--branch", branch, "--depth", "1", "--", repo_url, "."])
+            .arg("-c")
+            .arg(&git_cmd)
             .output()
             .map_err(|e| AppError::Git(format!("Failed to run git clone: {e}")))?;
 
@@ -141,11 +157,27 @@ fn clone_to_current_dir(target_dir: &Path, repo_url: &str, branch: &str) -> Resu
 
 /// Fetch and checkout
 #[allow(dead_code)]
-fn fetch_and_checkout(target_dir: &Path, branch: &str) -> Result<(), AppError> {
+fn fetch_and_checkout(target_dir: &Path, branch: &str, run_user: Option<&str>) -> Result<(), AppError> {
+    // Build git commands with sudo if run_user is specified
+    let (git_fetch, git_checkout, git_pull) = if let Some(user) = run_user {
+        (
+            format!("sudo -u {user} git fetch origin {branch}"),
+            format!("sudo -u {user} git checkout -f origin/{branch}"),
+            format!("sudo -u {user} git pull origin {branch}"),
+        )
+    } else {
+        (
+            format!("git fetch origin {branch}"),
+            format!("git checkout -f origin/{branch}"),
+            format!("git pull origin {branch}"),
+        )
+    };
+
     // Fetch
-    let output = Command::new("git")
+    let output = Command::new("sh")
         .current_dir(target_dir)
-        .args(["fetch", "origin", branch])
+        .arg("-c")
+        .arg(&git_fetch)
         .output()
         .map_err(|e| AppError::Git(format!("Failed to run git fetch: {e}")))?;
 
@@ -155,9 +187,10 @@ fn fetch_and_checkout(target_dir: &Path, branch: &str) -> Result<(), AppError> {
     }
 
     // Checkout
-    let output = Command::new("git")
+    let output = Command::new("sh")
         .current_dir(target_dir)
-        .args(["checkout", "-f", &format!("origin/{branch}")])
+        .arg("-c")
+        .arg(&git_checkout)
         .output()
         .map_err(|e| AppError::Git(format!("Failed to run git checkout: {e}")))?;
 
@@ -167,9 +200,10 @@ fn fetch_and_checkout(target_dir: &Path, branch: &str) -> Result<(), AppError> {
     }
 
     // Pull latest
-    let output = Command::new("git")
+    let output = Command::new("sh")
         .current_dir(target_dir)
-        .args(["pull", "origin"])
+        .arg("-c")
+        .arg(&git_pull)
         .output()
         .map_err(|e| AppError::Git(format!("Failed to run git pull: {e}")))?;
 
@@ -274,7 +308,22 @@ mod tests {
 
         let result = is_directory_empty(&temp_dir_path);
         assert!(result.is_ok());
+        // Hidden files are considered empty (user responsibility to keep directory clean)
         assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_is_directory_empty_with_regular_files() {
+        // Create temp directory with regular files (not hidden)
+        // This should be considered non-empty and trigger fetch_and_checkout
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let temp_dir_path = temp_dir.path().to_path_buf();
+        fs::write(temp_dir_path.join("README.md"), "# Project").unwrap();
+
+        let result = is_directory_empty(&temp_dir_path);
+        assert!(result.is_ok());
+        // Regular files mean directory is NOT empty
+        assert!(!result.unwrap());
     }
 
     #[tokio::test]

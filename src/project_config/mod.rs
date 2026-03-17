@@ -17,6 +17,9 @@ pub struct ProjectConfig {
     pub install_command: Option<String>,
     pub build_command: Option<String>,
     pub extra_command: Option<String>,
+    /// Run commands as this user (e.g., "www-data", "nginx")
+    #[serde(default)]
+    pub run_user: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
 }
@@ -49,6 +52,7 @@ docker_service = "php"
 working_dir = "/app"
 install_command = "composer install"
 build_command = "php artisan migrate"
+run_user = "www-data"
 env = {{ APP_ENV = "production", DB_HOST = "localhost" }}
 "#
         )
@@ -64,6 +68,7 @@ env = {{ APP_ENV = "production", DB_HOST = "localhost" }}
         assert_eq!(config.install_command, Some("composer install".to_string()));
         assert_eq!(config.build_command, Some("php artisan migrate".to_string()));
         assert_eq!(config.extra_command, None);
+        assert_eq!(config.run_user, Some("www-data".to_string()));
         assert_eq!(config.env.get("APP_ENV"), Some(&"production".to_string()));
         assert_eq!(config.env.get("DB_HOST"), Some(&"localhost".to_string()));
     }
@@ -91,6 +96,7 @@ project_type = "nodejs"
         assert_eq!(config.install_command, None);
         assert_eq!(config.build_command, None);
         assert_eq!(config.extra_command, None);
+        assert_eq!(config.run_user, None);
         assert!(config.env.is_empty());
     }
 
@@ -159,5 +165,25 @@ working_dir="/var/www/zgq"
 
         let result = ProjectConfig::load_from_file(file.path());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_project_config_run_user_parsing() {
+        // Test with run_user specified
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/test/test.git"
+branch = "main"
+project_type = "nodejs"
+run_user = "nginx"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.run_user, Some("nginx".to_string()));
     }
 }

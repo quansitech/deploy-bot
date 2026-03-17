@@ -4,10 +4,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, error};
 
+use crate::config;
 use crate::deploy::manager::{Deployment, DeploymentManager, DeploymentStatus};
 use crate::git;
 use crate::installer;
 use crate::runner;
+
+/// Get user display string for logs (e.g., "[www-data]" or "[default]")
+fn get_user_log_prefix(run_user: Option<&str>) -> String {
+    match run_user {
+        Some(user) => format!("[{user}]"),
+        None => String::new(),
+    }
+}
 
 /// Strip ANSI escape codes from string (for clean log output)
 fn strip_ansi_codes(s: &str) -> String {
@@ -41,6 +50,7 @@ pub async fn execute_deployment(
     deployment: Deployment,
     workspace_dir: &str,
     docker_compose_path: Option<&str>,
+    docker_compose_command: Option<config::DockerComposeCommand>,
     deployment_manager: Arc<DeploymentManager>,
 ) {
     let deployment_id = deployment.id.clone();
@@ -60,12 +70,14 @@ pub async fn execute_deployment(
     let project_dir = PathBuf::from(workspace_dir).join(&project_name);
 
     // Step 1: Pull repository
-    deployment_manager.add_log(&deployment_id, "info", "Pulling repository...");
+    let user_prefix = get_user_log_prefix(project.run_user.as_deref());
+    deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Pulling repository..."));
     match git::pull_repo(
         project.repo_url.clone(),
         project_dir.clone(),
         project.branch.clone(),
         None, // SSH key - TODO: add to config
+        project.run_user.as_deref(),
     ).await {
         Ok(_) => {
             info!("Git pull successful for {}", project_name);
@@ -81,9 +93,10 @@ pub async fn execute_deployment(
     }
 
     // Step 2: Install dependencies
-    deployment_manager.add_log(&deployment_id, "info", "Installing dependencies...");
-    info!("Installing dependencies: install_command={:?}, docker_service={:?}, working_dir={:?}",
-        project.install_command, project.docker_service, project.working_dir);
+    let user_prefix = get_user_log_prefix(project.run_user.as_deref());
+    deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Installing dependencies..."));
+    info!("Installing dependencies: install_command={:?}, docker_service={:?}, working_dir={:?}, run_user={:?}",
+        project.install_command, project.docker_service, project.working_dir, project.run_user);
 
     // Create log callback for real-time log streaming
     let deployment_manager_clone = deployment_manager.clone();
@@ -98,8 +111,10 @@ pub async fn execute_deployment(
         project.install_command.as_deref(),
         &project.env,
         docker_compose_path,
+        docker_compose_command,
         project.docker_service.as_deref(),
         project.working_dir.as_deref(),
+        project.run_user.as_deref(),
         log_callback,
     ).await {
         Ok(output) => {
@@ -114,7 +129,7 @@ pub async fn execute_deployment(
                     deployment_manager.add_log(&deployment_id, "info", &format!("... and {} more lines", clean_output.lines().count() - 20));
                 }
             }
-            deployment_manager.add_log(&deployment_id, "info", "Dependencies installed successfully");
+            deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Dependencies installed successfully"));
         }
         Err(e) => {
             error!("Dependency installation failed for {}: {}", project_name, e);
@@ -126,15 +141,17 @@ pub async fn execute_deployment(
     }
 
     // Step 3: Build project (use custom command if provided, otherwise use default for project type)
-    deployment_manager.add_log(&deployment_id, "info", "Running build step");
+    deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Running build step"));
     match runner::task::run_build(
         &project_dir,
         &project.project_type,
         project.build_command.as_deref(),
         &project.env,
         docker_compose_path,
+        docker_compose_command,
         project.docker_service.as_deref(),
         project.working_dir.as_deref(),
+        project.run_user.as_deref(),
     ).await {
         Ok(output) => {
             info!("Build step completed for {}", project_name);
@@ -148,7 +165,7 @@ pub async fn execute_deployment(
                     deployment_manager.add_log(&deployment_id, "info", &format!("... and {} more lines", clean_output.lines().count() - 20));
                 }
             }
-            deployment_manager.add_log(&deployment_id, "info", "Build step completed");
+            deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Build step completed"));
         }
         Err(e) => {
             error!("Build step failed for {}: {}", project_name, e);
@@ -161,14 +178,16 @@ pub async fn execute_deployment(
 
     // Step 4: Run extra_command if configured
     if let Some(ref extra_cmd) = project.extra_command {
-        deployment_manager.add_log(&deployment_id, "info", &format!("Running extra command: {extra_cmd}"));
+        deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Running extra command: {extra_cmd}"));
         match runner::task::run_command(
             &project_dir,
             extra_cmd,
             &project.env,
             docker_compose_path,
+            docker_compose_command,
             project.docker_service.as_deref(),
             project.working_dir.as_deref(),
+            project.run_user.as_deref(),
         ).await {
             Ok(output) => {
                 info!("Extra command successful for {}", project_name);
@@ -181,7 +200,7 @@ pub async fn execute_deployment(
                         deployment_manager.add_log(&deployment_id, "info", &format!("... and {} more lines", clean_output.lines().count() - 20));
                     }
                 }
-                deployment_manager.add_log(&deployment_id, "info", "Extra command completed successfully");
+                deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Extra command completed successfully"));
             }
             Err(e) => {
                 error!("Extra command failed for {}: {}", project_name, e);
@@ -264,7 +283,7 @@ mod tests {
         // This test ensures the function can be called with docker_compose_path argument
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
 
         let project_name = "test-project";
         let workspace_dir = temp_dir.path().join("workspace").join(project_name);
@@ -285,6 +304,7 @@ mod tests {
                 install_command: None,
                 build_command: None,
                 extra_command: None,
+                run_user: None,
                 env: HashMap::new(),
             },
             status: DeploymentStatus::Pending,
@@ -305,6 +325,7 @@ mod tests {
                 deployment,
                 &workspace_base,
                 Some("./docker-compose.yaml"),  // docker_compose_path = Some
+                Some(config::DockerComposeCommand::DockerCompose),  // docker_compose_command
                 std::sync::Arc::new(manager),
             ).await;
         });
@@ -315,7 +336,7 @@ mod tests {
         // Test that execute_deployment accepts docker_compose_path = None
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        let manager = DeploymentManager::new(&db_path).unwrap();
+        let manager = DeploymentManager::new(&db_path, temp_dir.path().to_string_lossy().to_string()).unwrap();
 
         let project_name = "test-project-2";
         let workspace_dir = temp_dir.path().join("workspace").join(project_name);
@@ -336,6 +357,7 @@ mod tests {
                 install_command: None,
                 build_command: None,
                 extra_command: None,
+                run_user: None,
                 env: HashMap::new(),
             },
             status: DeploymentStatus::Pending,
@@ -353,6 +375,7 @@ mod tests {
                 deployment,
                 &workspace_base,
                 None,  // docker_compose_path = None
+                None,  // docker_compose_command = None
                 std::sync::Arc::new(manager),
             ).await;
         });
