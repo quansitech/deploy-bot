@@ -60,7 +60,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
 
     // Initialize logging first
-    let _guard = logging::init(std::path::PathBuf::from(&config.server.log_dir));
+    logging::init();
 
     // Log detected docker compose command (after logging is initialized)
     match &config.server.docker_compose_command {

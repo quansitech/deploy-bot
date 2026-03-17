@@ -37,7 +37,6 @@ docker_compose_path = "./docker-compose.yaml"
 |------|------|------|
 | host | 是 | 服务监听地址 |
 | port | 是 | 服务监听端口 |
-| log_dir | 是 | 日志保存目录 |
 | workspace_dir | 是 | 工作空间目录（存放项目代码） |
 | docker_compose_path | 否 | Docker Compose 文件路径 |
 | github_secret | 否 | GitHub Webhook 签名密钥 |
@@ -275,10 +274,6 @@ github_secret = "your-github-webhook-secret"
 - Header 名称大小写不敏感（`X-Codeup-Token` 或 `x-codeup-token` 均可）
 - GitHub 使用签名验证（`X-Hub-Signature-256: sha256=...`）
 - GitLab/Codeup 使用 Token 验证（Header 值与配置值完全匹配）
-
-## 日志
-
-日志保存在 `./logs` 目录下，按日期滚动。
 
 ## 构建
 

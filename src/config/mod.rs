@@ -15,7 +15,6 @@ pub struct ServerConfig {
     pub github_secret: Option<String>,
     pub gitlab_token: Option<String>,
     pub codeup_token: Option<String>,
-    pub log_dir: String,
     pub workspace_dir: String,
     pub docker_compose_path: Option<String>,
     /// Detected docker compose command (None if docker_compose_path is not set)
@@ -132,7 +131,6 @@ mod tests {
 [server]
 host = "0.0.0.0"
 port = 8080
-log_dir = "./logs"
 workspace_dir = "./workspace"
 docker_compose_path = "./docker-compose.yaml"
 "#
@@ -161,7 +159,6 @@ port = 9000
 github_secret = "secret"
 gitlab_token = "gitlab-token"
 codeup_token = "codeup-token"
-log_dir = "/var/log"
 workspace_dir = "/var/workspace"
 "#
         )
