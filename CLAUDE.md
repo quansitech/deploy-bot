@@ -44,3 +44,25 @@ cargo test
 # 构建
 cargo build --release
 ```
+
+## 发布流程
+
+**每次发布新版本前，必须更新 Cargo.toml 中的版本号：**
+
+```toml
+[package]
+version = "0.2.0"  # 更新为新版本号
+```
+
+**发布步骤：**
+
+1. 更新 Cargo.toml 版本号
+2. 提交代码并推送
+3. 创建 tag 并推送：
+
+```bash
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+GitHub Actions 会自动构建并发布。
