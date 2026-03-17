@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: stable
+
+jobs:
+  build:
+    name: Build Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Add musl target
+        run: rustup target add x86_64-unknown-linux-gnu
+
+      - name: Build release
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu
+
+      - name: Create binary archive
+        run: |
+          cd target/x86_64-unknown-linux-gnu/release
+          tar -czvf deploy-bot-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz deploy-bot
+
+      - name: Get short SHA
+        id: slug
+        run: echo "SHA8=${{ github.sha[0:8] }}" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: target/x86_64-unknown-linux-gnu/release/deploy-bot-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Notify deploy-bot
+        if: success()
+        run: |
+          # Get the release info
+          TAG_NAME="${{ github.ref_name }}"
+          # Construct download URL (using the tag)
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG_NAME}/deploy-bot-${TAG_NAME}-x86_64-unknown-linux-gnu.tar.gz"
+
+          # Parse webhook URLs (comma-separated)
+          IFS=',' read -ra WEBHOOK_URLS <<< "${{ secrets.DEPLOY_BOT_WEBHOOK_URLS }}"
+
+          # Send webhook to each deploy-bot
+          for URL in "${WEBHOOK_URLS[@]}"; do
+            # Trim whitespace
+            URL=$(echo "$URL" | xargs)
+            if [ -n "$URL" ]; then
+              # Add secret header if configured
+              if [ -n "${{ secrets.DEPLOY_BOT_WEBHOOK_SECRET }}" ]; then
+                curl -X POST "$URL" \
+                  -H "Content-Type: application/json" \
+                  -H "X-Update-Secret: ${{ secrets.DEPLOY_BOT_WEBHOOK_SECRET }}" \
+                  -d "{\"tag_name\": \"${TAG_NAME}\", \"browser_download_url\": \"${DOWNLOAD_URL}\"}"
+              else
+                curl -X POST "$URL" \
+                  -H "Content-Type: application/json" \
+                  -d "{\"tag_name\": \"${TAG_NAME}\", \"browser_download_url\": \"${DOWNLOAD_URL}\"}"
+              fi
+              echo "Notified deploy-bot: ${URL}"
+            fi
+          done
+
+          if [ -z "${{ secrets.DEPLOY_BOT_WEBHOOK_URLS }}" ]; then
+            echo "DEPLOY_BOT_WEBHOOK_URLS not configured, skipping notification"
+          fi
+
+      - name: Notify deploy-bot on failure
+        if: failure()
+        run: |
+          echo "Release workflow failed, not notifying deploy-bot"

@@ -9,6 +9,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[allow(dead_code)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -19,6 +20,12 @@ pub struct ServerConfig {
     pub docker_compose_path: Option<String>,
     /// Detected docker compose command (None if docker_compose_path is not set)
     pub docker_compose_command: Option<DockerComposeCommand>,
+    /// Path to the update script for self-update functionality
+    pub update_script: Option<String>,
+    /// Secret for self-update webhook verification
+    pub update_webhook_secret: Option<String>,
+    /// Comma-separated webhook URLs to notify on self-update (can be multiple)
+    pub update_webhook_urls: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -113,6 +120,18 @@ impl Config {
             DockerComposeCommand::detect(&config.server.docker_compose_path);
 
         Ok(config)
+    }
+}
+
+impl ServerConfig {
+    /// Check if self-update is configured
+    pub fn is_update_script_configured(&self) -> bool {
+        self.update_script.is_some()
+    }
+
+    /// Check if webhook secret is configured for self-update
+    pub fn is_update_webhook_secret_configured(&self) -> bool {
+        self.update_webhook_secret.is_some()
     }
 }
 

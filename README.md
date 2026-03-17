@@ -10,6 +10,7 @@
 - **多语言支持**：Node.js、Rust、Python、PHP
 - **Docker 支持**：支持 Docker Compose 部署
 - **自定义命令**：支持自定义安装和构建命令
+- **自更新**：支持 GitHub Releases 自动更新
 
 ## 快速开始
 
@@ -42,6 +43,8 @@ docker_compose_path = "./docker-compose.yaml"
 | github_secret | 否 | GitHub Webhook 签名密钥 |
 | gitlab_token | 否 | GitLab Webhook Token |
 | codeup_token | 否 | 阿里云 Codeup Webhook Token |
+| update_script | 否 | 自更新脚本路径 |
+| update_webhook_secret | 否 | 自更新 Webhook 验证密钥 |
 
 ### 字段详细说明
 
@@ -274,6 +277,102 @@ github_secret = "your-github-webhook-secret"
 - Header 名称大小写不敏感（`X-Codeup-Token` 或 `x-codeup-token` 均可）
 - GitHub 使用签名验证（`X-Hub-Signature-256: sha256=...`）
 - GitLab/Codeup 使用 Token 验证（Header 值与配置值完全匹配）
+
+## 自更新 (Self-Update)
+
+deploy-bot 支持从 GitHub Releases 自动下载并更新自身。
+
+### 1. 配置更新脚本
+
+在 `config.yaml` 中配置更新脚本路径：
+
+```yaml
+[server]
+# ... 其他配置 ...
+
+# 自更新配置
+update_script = "/opt/deploy-bot/update.sh"
+update_webhook_secret = "your-webhook-secret"
+```
+
+#### update_script
+自更新脚本路径。该脚本负责停止旧进程、替换二进制、启动新进程。
+
+示例脚本：
+```bash
+#!/bin/bash
+# /opt/deploy-bot/update.sh
+NEW_BINARY="$1"
+BINARY_PATH="/usr/local/bin/deploy-bot"
+
+# 停止服务
+systemctl stop deploy-bot
+
+# 替换二进制
+cp "$NEW_BINARY" "$BINARY_PATH"
+chmod +x "$BINARY_PATH"
+
+# 启动服务
+systemctl start deploy-bot
+```
+
+#### update_webhook_secret
+自更新 Webhook 验证密钥。用于验证更新请求的来源合法性。
+
+### 2. GitHub Actions 配置
+
+在 GitHub 仓库的 **Settings** → **Secrets and variables** → **Actions** 中添加 Secrets：
+
+| Secret Name | 说明 | 示例 |
+|-------------|------|------|
+| `DEPLOY_BOT_WEBHOOK_URLS` | 逗号分隔的 webhook 地址 | `http://192.168.1.100:8088/webhook/update-self` |
+| `DEPLOY_BOT_WEBHOOK_SECRET` | 验证密钥（可选） | `your-webhook-secret` |
+
+### 3. 发布流程
+
+```bash
+# 打标签
+git tag v0.2.0
+git push --tags
+```
+
+GitHub Actions 会自动：
+1. 构建 release 二进制
+2. 上传到 GitHub Releases
+3. 发送 webhook 通知 deploy-bot
+
+### 4. 版本比对
+
+deploy-bot 会自动比对版本号：
+- 只有新版本号大于当前版本时才执行更新
+- 版本号格式：`v{major}.{minor}.{patch}`
+- 如果当前版本更新或相同，则跳过更新
+
+### 5. API 端点
+
+#### POST /webhook/update-self
+
+自更新 webhook 端点。
+
+Headers:
+- `X-Update-Secret`: Webhook 验证密钥（如果配置了 `update_webhook_secret`）
+
+Request Body:
+```json
+{
+  "tag_name": "v0.2.0",
+  "browser_download_url": "https://github.com/.../deploy-bot-v0.2.0-x86_64.tar.gz"
+}
+```
+
+Response:
+```json
+{
+  "message": "Update to v0.2.0 initiated",
+  "updated": true,
+  "version": "v0.2.0"
+}
+```
 
 ## 构建
 

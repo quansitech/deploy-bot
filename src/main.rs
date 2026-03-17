@@ -9,6 +9,7 @@ mod git;
 mod installer;
 mod logging;
 mod runner;
+mod self_update;
 mod webhook;
 mod project_config;
 mod web_ui;
@@ -131,6 +132,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/deploy/:id/retry", post(web_ui::retry_deployment))
         // Webhook route
         .route("/webhook/:project_name", post(webhook::handler::handle_webhook))
+        // Self-update route
+        .route("/webhook/update-self", post(self_update::handle_self_update))
         // WebSocket route
         .route("/ws/deploy/:id", get(websocket::ws_handler))
         .layer(TraceLayer::new_for_http())
