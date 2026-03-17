@@ -38,10 +38,6 @@ jobs:
           cd target/x86_64-unknown-linux-gnu/release
           tar -czvf deploy-bot-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz deploy-bot
 
-      - name: Get short SHA
-        id: slug
-        run: echo "SHA8=${{ github.sha[0:8] }}" >> $GITHUB_OUTPUT
-
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v2
