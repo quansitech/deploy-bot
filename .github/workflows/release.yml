@@ -18,27 +18,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check if release already exists
+        id: check_release
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          # Check if release already exists
+          if gh release view "$TAG_NAME" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            echo "Release $TAG_NAME already exists, skipping build"
+            echo "SKIP_BUILD=true" >> $GITHUB_OUTPUT
+          else
+            echo "SKIP_BUILD=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Checkout code
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         uses: actions/checkout@v4
 
       - name: Install Rust
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
       - name: Add musl target
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         run: rustup target add x86_64-unknown-linux-gnu
 
       - name: Build release
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         run: |
           cargo build --release --target x86_64-unknown-linux-gnu
 
       - name: Create binary archive
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         run: |
           cd target/x86_64-unknown-linux-gnu/release
           tar -czvf deploy-bot-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz deploy-bot
 
       - name: Create Release
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         id: create_release
         uses: softprops/action-gh-release@v2
         with:
@@ -51,6 +71,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Release Asset
+        if: steps.check_release.outputs.SKIP_BUILD == 'false'
         id: upload-release-asset
         uses: softprops/action-gh-release@v2
         with:
