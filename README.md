@@ -131,6 +131,7 @@ curl -X POST http://localhost:8080/webhook/my-project \
 | run_user | 否 | 运行命令的用户（如 www-data、nginx） |
 | install_command | 否 | 自定义安装命令 |
 | build_command | 否 | 自定义构建命令 |
+| extra_command | 否 | 部署完成后执行的额外命令 |
 | env | 否 | 环境变量（键值对） |
 
 ### 字段详细说明
@@ -160,6 +161,28 @@ run_user = "www-data"  # 以 www-data 用户身份执行命令
 使用此功能需要：
 1. 部署服务器上存在指定的用户
 2. 部署进程用户有 sudo 权限（无密码 sudo 更佳）
+
+#### install_command / build_command
+自定义安装和构建命令。如果指定这两个字段，会覆盖项目类型的默认行为。
+
+```yaml
+# 覆盖默认的 npm install
+install_command = "npm install --legacy-peer-deps"
+
+# 覆盖默认的 npm run build
+build_command = "npm run build:prod"
+```
+
+**注意：** 设置 `install_command` 或 `build_command` 后，将完全使用自定义命令，不再执行默认命令。
+
+#### extra_command
+在构建完成后执行的额外命令。常用于部署后操作，如重启服务、清理缓存等。
+
+```yaml
+extra_command = "php artisan optimize:clear && systemctl restart nginx"
+```
+
+**执行时机：** 在 build_command 执行完成后运行（如果设置了 build_command），或在 install_command 后运行。
 
 #### env
 环境变量，在执行安装和构建命令时注入到当前环境。
