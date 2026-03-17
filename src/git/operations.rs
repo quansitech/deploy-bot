@@ -215,52 +215,6 @@ fn fetch_and_checkout(target_dir: &Path, branch: &str, run_user: Option<&str>) -
     Ok(())
 }
 
-/// Checkout a specific ref (branch, tag, or commit)
-#[allow(dead_code)]
-pub async fn checkout_ref(
-    target_dir: PathBuf,
-    ref_name: String,
-) -> Result<(), AppError> {
-    tokio::task::spawn_blocking(move || {
-        let output = Command::new("git")
-            .current_dir(&target_dir)
-            .args(["checkout", "-f", &ref_name])
-            .output()
-            .map_err(|e| AppError::Git(format!("Failed to run git checkout: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::Git(format!("Git checkout failed: {stderr}")));
-        }
-
-        Ok(())
-    })
-    .await
-    .map_err(|e| AppError::Git(format!("Task join error: {e}")))?
-}
-
-/// Get the latest commit hash
-#[allow(dead_code)]
-pub async fn get_latest_commit(repo_dir: PathBuf) -> Result<String, AppError> {
-    tokio::task::spawn_blocking(move || {
-        let output = Command::new("git")
-            .current_dir(&repo_dir)
-            .args(["rev-parse", "HEAD"])
-            .output()
-            .map_err(|e| AppError::Git(format!("Failed to run git rev-parse: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(AppError::Git(format!("Git rev-parse failed: {stderr}")));
-        }
-
-        let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Ok(hash)
-    })
-    .await
-    .map_err(|e| AppError::Git(format!("Task join error: {e}")))?
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,20 +278,5 @@ mod tests {
         assert!(result.is_ok());
         // Regular files mean directory is NOT empty
         assert!(!result.unwrap());
-    }
-
-    #[tokio::test]
-    async fn test_checkout_ref_invalid_dir() {
-        let result = checkout_ref(
-            PathBuf::from("/nonexistent/path"),
-            "main".to_string(),
-        ).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_get_latest_commit_invalid_dir() {
-        let result = get_latest_commit(PathBuf::from("/nonexistent/path")).await;
-        assert!(result.is_err());
     }
 }

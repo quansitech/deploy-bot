@@ -10,35 +10,6 @@ use crate::error::AppError;
 /// Log callback type for real-time log streaming
 pub type LogCallback = Arc<dyn Fn(String) + Send + Sync>;
 
-/// Detect project type from project files
-#[allow(dead_code)]
-pub fn detect_project_type(project_dir: &Path) -> ProjectType {
-    // Check for Node.js
-    if project_dir.join("package.json").exists() {
-        return ProjectType::Nodejs;
-    }
-
-    // Check for Rust
-    if project_dir.join("Cargo.toml").exists() {
-        return ProjectType::Rust;
-    }
-
-    // Check for Python
-    if project_dir.join("requirements.txt").exists()
-        || project_dir.join("pyproject.toml").exists()
-        || project_dir.join("setup.py").exists()
-    {
-        return ProjectType::Python;
-    }
-
-    // Check for PHP
-    if project_dir.join("composer.json").exists() {
-        return ProjectType::Php;
-    }
-
-    ProjectType::Custom
-}
-
 /// Install dependencies based on project type
 /// Returns (Result, output_string) - output_string contains command stdout/stderr for logging
 #[allow(clippy::too_many_arguments)]
@@ -461,81 +432,6 @@ async fn run_docker_compose(
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_detect_project_type_nodejs() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("package.json"), "{}").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Nodejs);
-    }
-
-    #[test]
-    fn test_detect_project_type_rust() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Rust);
-    }
-
-    #[test]
-    fn test_detect_project_type_python_requirements() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("requirements.txt"), "flask").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Python);
-    }
-
-    #[test]
-    fn test_detect_project_type_python_pyproject() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("pyproject.toml"), "[project]").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Python);
-    }
-
-    #[test]
-    fn test_detect_project_type_python_setup() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("setup.py"), "from setuptools import setup").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Python);
-    }
-
-    #[test]
-    fn test_detect_project_type_php() {
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("composer.json"), "{}").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Php);
-    }
-
-    #[test]
-    fn test_detect_project_type_custom() {
-        let temp_dir = TempDir::new().unwrap();
-        // No recognized project files
-        std::fs::write(temp_dir.path().join("README.md"), "# Project").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Custom);
-    }
-
-    #[test]
-    fn test_detect_project_type_priority_nodejs() {
-        // Node.js should be detected first when multiple files exist
-        let temp_dir = TempDir::new().unwrap();
-        std::fs::write(temp_dir.path().join("package.json"), "{}").unwrap();
-        std::fs::write(temp_dir.path().join("Cargo.toml"), "[package]").unwrap();
-
-        let project_type = detect_project_type(temp_dir.path());
-        assert_eq!(project_type, ProjectType::Nodejs);
-    }
 
     #[tokio::test]
     async fn test_run_command_empty_command() {

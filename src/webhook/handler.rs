@@ -94,6 +94,12 @@ fn validate_webhook_request(
     body: &[u8],
     server_config: &crate::config::ServerConfig,
 ) -> AppResult<()> {
+    // Debug: 打印收到的 headers
+    tracing::debug!("Received webhook headers: {:?}", headers.keys().collect::<Vec<_>>());
+    for (name, value) in headers.iter() {
+        tracing::debug!("  {}: {:?}", name.as_str(), value.to_str().unwrap_or("(binary)"));
+    }
+
     // 检查各个平台的 header
 
     // GitHub: X-Hub-Signature-256
@@ -118,21 +124,26 @@ fn validate_webhook_request(
         }
     }
 
-    // Codeup: X-Codeup-Token
-    if let Some(token) = headers.get("X-Codeup-Token") {
+    // Codeup: X-Codeup-Token (case-insensitive)
+    let codeup_header = headers
+        .get("X-Codeup-Token")
+        .or_else(|| headers.get("x-codeup-token"));
+    if let Some(token) = codeup_header {
+        tracing::debug!("Found X-Codeup-Token header, config has codeup_token: {}", server_config.codeup_token.is_some());
         if let Some(secret) = &server_config.codeup_token {
             let token_str = token.to_str()
                 .map_err(|_| AppError::WebhookValidation("Invalid token header".to_string()))?;
+            tracing::debug!("Comparing token: request='{}', config='{}'", token_str, secret);
             webhook_middleware::validate_codeup_token(token_str, secret)?;
             info!("Codeup webhook token validated");
             return Ok(());
         }
     }
 
-    // 如果没有配置任何平台的验证，或者请求不包含任何验证 header，则跳过验证
-    // (向后兼容)
-    info!("No webhook validation applied - no valid token/secret found");
-    Ok(())
+    // 没有配置任何平台的验证，返回错误
+    Err(AppError::WebhookValidation(
+        "Webhook validation required but no valid token/secret found. Please configure at least one of: github_secret, gitlab_token, codeup_token".to_string()
+    ))
 }
 
 #[cfg(test)]

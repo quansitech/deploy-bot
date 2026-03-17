@@ -21,7 +21,6 @@
 [server]
 host = "0.0.0.0"
 port = 8080
-webhook_token = "your-secure-token"
 log_dir = "./logs"
 workspace_dir = "./workspace"
 docker_compose_path = "./docker-compose.yaml"
@@ -38,7 +37,6 @@ docker_compose_path = "./docker-compose.yaml"
 |------|------|------|
 | host | 是 | 服务监听地址 |
 | port | 是 | 服务监听端口 |
-| webhook_token | 是 | Webhook 认证 Token |
 | log_dir | 是 | 日志保存目录 |
 | workspace_dir | 是 | 工作空间目录（存放项目代码） |
 | docker_compose_path | 否 | Docker Compose 文件路径 |
@@ -114,10 +112,7 @@ cargo build --release
 
 ### 5. 触发部署
 
-```bash
-curl -X POST http://localhost:8080/webhook/my-project \
-  -H "Authorization: Bearer your-secure-token"
-```
+配置好 Webhook 后，当有代码推送到指定分支时，会自动触发部署。
 
 ## 项目配置说明 (.deploy.yaml)
 
@@ -240,8 +235,10 @@ project_type = "custom"
 
 触发部署
 
-Headers:
-- `Authorization: Bearer <token>`
+Headers (至少配置一项):
+- `X-Hub-Signature-256`: GitHub HMAC-SHA256 签名
+- `X-Gitlab-Token`: GitLab Token
+- `X-Codeup-Token`: 阿里云 Codeup Token
 
 Response:
 ```json
@@ -253,11 +250,31 @@ Response:
 
 ## Webhook 验证
 
-支持多种平台的 Webhook 签名验证：
+Deploy Bot 强制要求 Webhook 验证，必须配置平台 Token 并在请求中带上对应的 Header。
 
-- **GitHub**: 使用 `X-Hub-Signature-256` Header 和 HMAC-SHA256 签名
-- **GitLab**: 使用 `X-Gitlab-Token` Header 和 Token 验证
-- **阿里云 Codeup**: 使用 `X-Codeup-Token` Header 和 Token 验证
+### 各平台 Header 对照表
+
+| 平台 | 请求 Header | 配置项 | 验证方式 |
+|------|-------------|--------|----------|
+| GitHub | `X-Hub-Signature-256` | `github_secret` | HMAC-SHA256 签名 |
+| GitLab | `X-Gitlab-Token` | `gitlab_token` | Token 字符串匹配 |
+| 阿里云 Codeup | `X-Codeup-Token` | `codeup_token` | Token 字符串匹配 |
+
+### 配置示例
+
+```yaml
+[server]
+# 选择至少一个平台配置
+github_secret = "your-github-webhook-secret"
+# gitlab_token = "your-gitlab-token"
+# codeup_token = "your-codeup-token"
+```
+
+### 注意事项
+
+- Header 名称大小写不敏感（`X-Codeup-Token` 或 `x-codeup-token` 均可）
+- GitHub 使用签名验证（`X-Hub-Signature-256: sha256=...`）
+- GitLab/Codeup 使用 Token 验证（Header 值与配置值完全匹配）
 
 ## 日志
 

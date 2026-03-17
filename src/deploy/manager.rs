@@ -241,27 +241,6 @@ impl DeploymentManager {
         }
     }
 
-    /// Cancel a deployment
-    #[allow(dead_code)]
-    pub fn cancel_deployment(&self, id: &str) -> bool {
-        let mut queue = self.queue.lock();
-        if let Some(deployment) = queue.iter_mut().find(|d| d.id == id) {
-            // Only pending deployments can be cancelled
-            if deployment.status == DeploymentStatus::Pending {
-                deployment.status = DeploymentStatus::Cancelled;
-                deployment.finished_at = Some(Utc::now());
-                let finished_at = deployment.finished_at;
-                let started_at = deployment.started_at;
-                drop(queue);
-
-                // Persist to database
-                let _ = self.db.update_deployment_status(id, &DeploymentStatus::Cancelled, started_at, finished_at);
-                return true;
-            }
-        }
-        false
-    }
-
     /// Get all deployments
     pub fn get_all_deployments(&self) -> Vec<Deployment> {
         // First check in-memory queue
@@ -387,11 +366,6 @@ impl DeploymentManager {
         self.db.get_deployment_logs(deployment_id).unwrap_or_default()
     }
 
-    /// Get database reference
-    #[allow(dead_code)]
-    pub fn database(&self) -> &Arc<Database> {
-        &self.db
-    }
 }
 
 impl Default for DeploymentManager {

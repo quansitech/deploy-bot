@@ -64,18 +64,6 @@ impl Database {
         Ok(())
     }
 
-    /// Get migration status
-    ///
-    /// Returns the list of applied migrations
-    #[allow(dead_code)]
-    pub fn get_migration_status(&self) -> SqliteResult<Vec<String>> {
-        let mut conn = self.conn.lock();
-        let migrations = migrations::migrations::runner()
-            .get_applied_migrations(&mut *conn)
-            .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
-        Ok(migrations.iter().map(|m| m.name().to_string()).collect())
-    }
-
     /// Insert a new deployment
     pub fn insert_deployment(&self, deployment: &Deployment) -> SqliteResult<()> {
         let conn = self.conn.lock();
@@ -253,12 +241,6 @@ impl Database {
         }
 
         Ok(logs)
-    }
-
-    /// Get the connection for internal use
-    #[allow(dead_code)]
-    pub fn connection(&self) -> &ParkingMutex<Connection> {
-        &self.conn
     }
 }
 

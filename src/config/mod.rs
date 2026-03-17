@@ -12,7 +12,6 @@ pub struct Config {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
-    pub webhook_token: String,
     pub github_secret: Option<String>,
     pub gitlab_token: Option<String>,
     pub codeup_token: Option<String>,
@@ -133,7 +132,6 @@ mod tests {
 [server]
 host = "0.0.0.0"
 port = 8080
-webhook_token = "test-token"
 log_dir = "./logs"
 workspace_dir = "./workspace"
 docker_compose_path = "./docker-compose.yaml"
@@ -145,7 +143,6 @@ docker_compose_path = "./docker-compose.yaml"
         let config = Config::load(file.path().to_str().unwrap()).unwrap();
         assert_eq!(config.server.host, "0.0.0.0");
         assert_eq!(config.server.port, 8080);
-        assert_eq!(config.server.webhook_token, "test-token");
         assert_eq!(
             config.server.docker_compose_path,
             Some("./docker-compose.yaml".to_string())
@@ -161,7 +158,6 @@ docker_compose_path = "./docker-compose.yaml"
 [server]
 host = "127.0.0.1"
 port = 9000
-webhook_token = "token"
 github_secret = "secret"
 gitlab_token = "gitlab-token"
 codeup_token = "codeup-token"
