@@ -171,6 +171,46 @@ env = {
 }
 ```
 
+#### project_type 默认行为
+不同项目类型的默认安装和构建命令：
+
+| 项目类型 | 默认安装命令 | 默认构建命令 | 说明 |
+|----------|--------------|--------------|------|
+| **nodejs** | 自动检测：pnpm > yarn > npm | `npm run build` | 根据 lock 文件自动选择包管理器 |
+| **python** | 自动检测：poetry > pip | 无（Python 无需构建） | poetry.lock 优先，否则安装 requirements.txt |
+| **php** | `composer install --no-dev` | 无（PHP 无需构建） | - |
+| **rust** | 无（cargo build 自动处理依赖） | `cargo build --release` | 构建阶段自动处理依赖 |
+| **custom** | 无 | 无 | 需要手动指定 install_command 和 build_command |
+
+**自动检测优先级：**
+- Node.js: `pnpm-lock.yaml` → `yarn.lock` → `npm`
+- Python: `poetry.lock` → `requirements.txt`
+
+**示例：**
+```yaml
+# Node.js 项目（自动检测）
+project_type = "nodejs"
+# 安装: pnpm install / yarn install / npm install
+# 构建: npm run build
+
+# Python 项目
+project_type = "python"
+# 安装: poetry install (如果有 poetry.lock)
+#     或 pip install -r requirements.txt (如果有 requirements.txt)
+
+# PHP 项目
+project_type = "php"
+# 安装: composer install --no-dev
+
+# Rust 项目
+project_type = "rust"
+# 构建: cargo build --release (无需单独安装)
+
+# 自定义项目
+project_type = "custom"
+# 需要手动指定 install_command 和 build_command
+```
+
 ## API 端点
 
 ### POST /webhook/:project_name
