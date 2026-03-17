@@ -7,6 +7,12 @@ set -e
 NEW_BINARY="$1"
 BINARY_PATH="/path/to/deploy-bot"  # 修改为你的 deploy-bot 路径
 PID_FILE="/var/run/deploy-bot.pid"  # 修改为你的 PID 文件路径
+LOG_FILE="/var/log/deploy-bot-update.log"
+
+# Redirect all output to log file
+exec > "$LOG_FILE" 2>&1
+
+echo "=== $(date) Starting update ==="
 
 if [ -z "$NEW_BINARY" ]; then
     echo "Usage: $0 <path-to-new-binary>"
@@ -18,20 +24,20 @@ if [ ! -f "$NEW_BINARY" ]; then
     exit 1
 fi
 
-# 停止运行中的进程
+# Stop running process
 if [ -f "$PID_FILE" ]; then
     PID=$(cat "$PID_FILE")
     if kill -0 "$PID" 2>/dev/null; then
         echo "Stopping deploy-bot (PID: $PID)..."
         kill "$PID"
-        # 等待进程停止
+        # Wait for process to stop
         for i in {1..10}; do
             if ! kill -0 "$PID" 2>/dev/null; then
                 break
             fi
             sleep 1
         done
-        # 如果进程仍未停止，强制终止
+        # Force kill if still running
         if kill -0 "$PID" 2>/dev/null; then
             echo "Force killing process..."
             kill -9 "$PID" 2>/dev/null || true
@@ -45,8 +51,8 @@ cp "$NEW_BINARY" "$BINARY_PATH"
 chmod +x "$BINARY_PATH"
 
 echo "Starting deploy-bot..."
-# 后台启动 deploy-bot
+# Start deploy-bot in background
 nohup "$BINARY_PATH" > /var/log/deploy-bot.log 2>&1 &
 echo $! > "$PID_FILE"
 
-echo "Update completed successfully!"
+echo "=== $(date) Update completed successfully ==="

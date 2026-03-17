@@ -1,6 +1,6 @@
 #!/bin/bash
-# update-systemd.sh
-# For systems using systemd (most Linux distributions)
+# update-service.sh
+# For systems using SysVinit (older Linux distributions)
 
 set -e
 
@@ -25,13 +25,22 @@ if [ ! -f "$NEW_BINARY" ]; then
 fi
 
 echo "Stopping $SERVICE_NAME service..."
-systemctl stop "$SERVICE_NAME"
+service "$SERVICE_NAME" stop || true
+
+# Wait for process to stop
+sleep 2
+
+# Force kill if still running
+if pgrep -x "$SERVICE_NAME" > /dev/null 2>&1; then
+    pkill -9 "$SERVICE_NAME" || true
+    sleep 1
+fi
 
 echo "Replacing binary..."
 cp "$NEW_BINARY" "$BINARY_PATH"
 chmod +x "$BINARY_PATH"
 
 echo "Starting $SERVICE_NAME service..."
-systemctl start "$SERVICE_NAME"
+service "$SERVICE_NAME" start
 
 echo "=== $(date) Update completed successfully ==="
