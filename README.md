@@ -86,10 +86,11 @@ branch = "main"
 project_type = "nodejs"
 # docker_service = "php"        # 可选：使用 Docker 容器执行命令
 # working_dir = "/app"          # 可选：命令执行目录
-# run_user = "www-data"        # 可选：运行命令的用户
+# run_user = "www-data"         # 可选：运行命令的用户
 # install_command = "npm install"
 # build_command = "npm run build"
 # env = { NODE_ENV = "production" }
+# restart_service = "web"       # 可选：部署完成后重启 Docker 服务
 ```
 
 ### 3. 启动服务
@@ -129,6 +130,7 @@ cargo build --release
 | build_command | 否 | 自定义构建命令 |
 | extra_command | 否 | 部署完成后执行的额外命令 |
 | env | 否 | 环境变量（键值对） |
+| restart_service | 否 | 部署完成后需要重启的 Docker 服务 |
 
 ### 字段详细说明
 
@@ -189,6 +191,26 @@ env = {
     API_KEY = "your-api-key"
 }
 ```
+
+#### restart_service
+部署完成后需要重启的 Docker 服务。配置后，deploy-bot 会自动执行 `docker compose restart <service>` 来重启服务。
+
+**典型使用场景：** 在 Docker 环境中部署 Python 等语言项目时，依赖安装通常在临时容器中执行，需要重启实际运行的服务容器才能让新依赖生效。
+
+```yaml
+# 单服务
+restart_service = "web"
+
+# 多服务（按顺序串行重启）
+restart_service = ["web", "worker"]
+```
+
+**执行时机：** 在所有部署步骤（git pull、安装依赖、构建、extra_command）完成后执行。
+
+**注意事项：**
+- 需要在 `config.yaml` 中配置 `docker_compose_path`
+- 服务名称必须存在于 docker-compose.yml 中
+- 重启失败会导致部署失败
 
 #### project_type 默认行为
 不同项目类型的默认安装和构建命令：

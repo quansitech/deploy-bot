@@ -6,6 +6,27 @@ use std::collections::HashMap;
 
 use crate::config::ProjectType;
 
+/// Docker 服务重启配置，支持字符串和数组两种格式
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(untagged)]
+pub enum RestartService {
+    #[default]
+    None,
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl RestartService {
+    /// 获取需要重启的服务列表
+    pub fn to_services(&self) -> Vec<String> {
+        match self {
+            RestartService::None => vec![],
+            RestartService::Single(s) => vec![s.clone()],
+            RestartService::Multiple(v) => v.clone(),
+        }
+    }
+}
+
 /// Project-level configuration loaded from .deploy.yaml
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProjectConfig {
@@ -22,6 +43,9 @@ pub struct ProjectConfig {
     pub run_user: Option<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// Docker 服务重启配置，部署完成后串行重启指定的服务
+    #[serde(default)]
+    pub restart_service: RestartService,
 }
 
 impl ProjectConfig {
@@ -185,5 +209,64 @@ run_user = "nginx"
 
         let config = ProjectConfig::load_from_file(file.path()).unwrap();
         assert_eq!(config.run_user, Some("nginx".to_string()));
+    }
+
+    #[test]
+    fn test_restart_service_single_string() {
+        // Test with single string restart_service
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/test/test.git"
+branch = "main"
+project_type = "python"
+restart_service = "web"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.restart_service.to_services(), vec!["web"]);
+    }
+
+    #[test]
+    fn test_restart_service_multiple() {
+        // Test with multiple services restart_service
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/test/test.git"
+branch = "main"
+project_type = "python"
+restart_service = ["web", "worker"]
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.restart_service.to_services(), vec!["web", "worker"]);
+    }
+
+    #[test]
+    fn test_restart_service_not_configured() {
+        // Test when restart_service is not configured
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/test/test.git"
+branch = "main"
+project_type = "python"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert!(config.restart_service.to_services().is_empty());
     }
 }

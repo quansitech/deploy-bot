@@ -1,10 +1,11 @@
 //! Deployment executor
 
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Arc;
 use tracing::{info, error};
 
-use crate::config;
+use crate::config::{DockerComposeCommand};
 use crate::deploy::manager::{Deployment, DeploymentManager, DeploymentStatus};
 use crate::git;
 use crate::installer;
@@ -45,12 +46,66 @@ fn strip_ansi_codes(s: &str) -> String {
     result
 }
 
+/// Restart Docker services sequentially
+/// Returns Ok(()) if all services restart successfully, or Err with service name and error message
+async fn restart_docker_services(
+    services: Vec<String>,
+    docker_compose_path: String,
+    docker_compose_command: Option<DockerComposeCommand>,
+    deployment_manager: &Arc<DeploymentManager>,
+    deployment_id: &str,
+) -> Result<(), (String, String)> {
+    // Determine which command to use
+    let docker_cmd = match docker_compose_command {
+        Some(DockerComposeCommand::DockerCompose) => "docker",
+        Some(DockerComposeCommand::DockerComposeLegacy) => "docker-compose",
+        None => {
+            // Should not happen if docker_compose_path is Some
+            return Err(("".to_string(), "Docker compose command not detected".to_string()));
+        }
+    };
+
+    for service in services {
+        let service_clone = service.clone();
+        let service_for_log = service.clone();
+        deployment_manager.add_log(deployment_id, "info", &format!("Restarting service: {service_clone}"));
+
+        let compose_path_clone = docker_compose_path.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let mut cmd = Command::new(docker_cmd);
+            if docker_cmd == "docker" {
+                cmd.arg("compose");
+            }
+            cmd.args(["-f", &compose_path_clone, "restart", &service]);
+            cmd.output()
+        })
+        .await
+        .map_err(|e| (service_clone.clone(), format!("Task join error: {e}")))?
+        .map_err(|e| (service_clone.clone(), format!("IO error: {e}")))?;
+
+        if !result.status.success() {
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            let error_msg = if stderr.is_empty() {
+                String::from_utf8_lossy(&result.stdout).to_string()
+            } else {
+                stderr.to_string()
+            };
+            deployment_manager.add_log(deployment_id, "error", &format!("Failed to restart service {service_clone}: {error_msg}"));
+            return Err((service_clone, error_msg));
+        }
+
+        deployment_manager.add_log(deployment_id, "info", &format!("Service {service_for_log} restarted successfully"));
+    }
+
+    Ok(())
+}
+
 /// Execute a deployment task
 pub async fn execute_deployment(
     deployment: Deployment,
     workspace_dir: &str,
     docker_compose_path: Option<&str>,
-    docker_compose_command: Option<config::DockerComposeCommand>,
+    docker_compose_command: Option<DockerComposeCommand>,
     deployment_manager: Arc<DeploymentManager>,
 ) {
     let deployment_id = deployment.id.clone();
@@ -212,6 +267,40 @@ pub async fn execute_deployment(
         }
     }
 
+    // Step 5: Restart Docker services if configured
+    let services_to_restart = project.restart_service.to_services();
+    info!("Checking restart_service: services_to_restart={:?}, docker_compose_path={:?}, docker_compose_command={:?}",
+        services_to_restart, docker_compose_path, docker_compose_command);
+    if !services_to_restart.is_empty() {
+        if let Some(compose_path) = docker_compose_path {
+            if let Some(compose_cmd) = docker_compose_command {
+                deployment_manager.add_log(&deployment_id, "info", &format!("Restarting {} Docker service(s)...", services_to_restart.len()));
+                match restart_docker_services(
+                    services_to_restart,
+                    compose_path.to_string(),
+                    Some(compose_cmd),
+                    &deployment_manager,
+                    &deployment_id,
+                ).await {
+                    Ok(_) => {
+                        deployment_manager.add_log(&deployment_id, "info", "All services restarted successfully");
+                    }
+                    Err((failed_service, error_msg)) => {
+                        error!("Failed to restart service {}: {}", failed_service, error_msg);
+                        deployment_manager.add_log(&deployment_id, "error", &format!("Service restart failed: {failed_service} - {error_msg}"));
+                        deployment_manager.update_status(&deployment_id, DeploymentStatus::Failed);
+                        deployment_manager.add_log(&deployment_id, "info", "Deployment failed");
+                        return;
+                    }
+                }
+            } else {
+                deployment_manager.add_log(&deployment_id, "warn", "Docker compose command not detected, skipping service restart");
+            }
+        } else {
+            deployment_manager.add_log(&deployment_id, "warn", "Docker compose path not configured, skipping service restart");
+        }
+    }
+
     // All steps completed successfully
     deployment_manager.update_status(&deployment_id, DeploymentStatus::Success);
     deployment_manager.add_log(&deployment_id, "info", "Deployment completed successfully");
@@ -306,6 +395,7 @@ mod tests {
                 extra_command: None,
                 run_user: None,
                 env: HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
             },
             status: DeploymentStatus::Pending,
             created_at: chrono::Utc::now(),
@@ -325,7 +415,7 @@ mod tests {
                 deployment,
                 &workspace_base,
                 Some("./docker-compose.yaml"),  // docker_compose_path = Some
-                Some(config::DockerComposeCommand::DockerCompose),  // docker_compose_command
+                Some(DockerComposeCommand::DockerCompose),  // docker_compose_command
                 std::sync::Arc::new(manager),
             ).await;
         });
@@ -359,6 +449,7 @@ mod tests {
                 extra_command: None,
                 run_user: None,
                 env: HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
             },
             status: DeploymentStatus::Pending,
             created_at: chrono::Utc::now(),

@@ -71,8 +71,8 @@ pub async fn handle_webhook(
     let project = ProjectConfig::load_from_file(&config_file)
         .map_err(|e| AppError::Config(format!("Failed to load project config: {e}")))?;
 
-    info!("Project config loaded: repo_url={}, branch={}, project_type={}, docker_service={:?}, working_dir={:?}",
-        project.repo_url, project.branch, project.project_type, project.docker_service, project.working_dir);
+    info!("Project config loaded: repo_url={}, branch={}, project_type={}, docker_service={:?}, working_dir={:?}, restart_service={:?}",
+        project.repo_url, project.branch, project.project_type, project.docker_service, project.working_dir, project.restart_service.to_services());
 
     // Step 4: 将部署任务加入队列
     let result = state.deployment_manager.queue_deployment(project_name, project);

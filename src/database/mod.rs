@@ -181,6 +181,7 @@ impl Database {
             extra_command: row.get(8)?,
             run_user: row.get(14).ok(),
             env: std::collections::HashMap::new(),
+            restart_service: crate::project_config::RestartService::None,
         };
 
         Ok(Deployment {
@@ -302,6 +303,7 @@ mod tests {
                 extra_command: None,
                 run_user: None,
                 env: std::collections::HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
             },
             status: DeploymentStatus::Pending,
             created_at: Utc::now(),
@@ -340,6 +342,7 @@ mod tests {
                 extra_command: None,
                 run_user: None,
                 env: std::collections::HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
             },
             status: DeploymentStatus::Success,
             created_at: Utc::now(),
@@ -374,6 +377,7 @@ mod tests {
                 extra_command: None,
                 run_user: None,
                 env: std::collections::HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
             },
             status: DeploymentStatus::Failed,
             created_at: Utc::now(),
@@ -411,6 +415,7 @@ mod tests {
                 extra_command: None,
                 run_user: None,
                 env: std::collections::HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
             },
             status: DeploymentStatus::Pending,
             created_at: Utc::now(),

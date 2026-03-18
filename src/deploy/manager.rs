@@ -401,6 +401,7 @@ mod tests {
             extra_command: None,
             run_user: None,
             env: HashMap::new(),
+            restart_service: crate::project_config::RestartService::None,
         }
     }
 
