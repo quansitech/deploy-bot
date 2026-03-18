@@ -26,6 +26,9 @@ pub struct ServerConfig {
     pub update_webhook_secret: Option<String>,
     /// Comma-separated webhook URLs to notify on self-update (can be multiple)
     pub update_webhook_urls: Option<String>,
+    /// GitHub mirror URL for self-update (e.g., "https://ghproxy.com/")
+    /// When configured, GitHub download URLs will be prefixed with this mirror
+    pub github_mirror: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -133,6 +136,12 @@ impl ServerConfig {
     pub fn is_update_webhook_secret_configured(&self) -> bool {
         self.update_webhook_secret.is_some()
     }
+
+    /// Check if GitHub mirror is configured for self-update
+    #[allow(dead_code)]
+    pub fn is_github_mirror_configured(&self) -> bool {
+        self.github_mirror.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -200,6 +209,50 @@ workspace_dir = "/var/workspace"
             Some("codeup-token".to_string())
         );
         assert_eq!(config.server.docker_compose_path, None);
+    }
+
+    #[test]
+    fn test_config_load_with_github_mirror() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+[server]
+host = "0.0.0.0"
+port = 8080
+workspace_dir = "/var/workspace"
+github_mirror = "https://ghproxy.com/"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = Config::load(file.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            config.server.github_mirror,
+            Some("https://ghproxy.com/".to_string())
+        );
+        assert!(config.server.is_github_mirror_configured());
+    }
+
+    #[test]
+    fn test_config_load_without_github_mirror() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+[server]
+host = "0.0.0.0"
+port = 8080
+workspace_dir = "/var/workspace"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = Config::load(file.path().to_str().unwrap()).unwrap();
+        assert_eq!(config.server.github_mirror, None);
+        assert!(!config.server.is_github_mirror_configured());
     }
 
     #[test]

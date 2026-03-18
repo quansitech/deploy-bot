@@ -88,9 +88,22 @@ pub fn is_newer_version(new_version: &str) -> AppResult<bool> {
 }
 
 /// Download binary from URL (supports .tar.gz and raw binary)
-pub async fn download_binary(url: &str, version: &str) -> AppResult<PathBuf> {
+pub async fn download_binary(url: &str, version: &str, github_mirror: Option<&str>) -> AppResult<PathBuf> {
     let temp_dir = std::env::temp_dir();
     let is_tarball = url.ends_with(".tar.gz");
+
+    // Apply GitHub mirror if configured and URL contains github.com
+    let download_url = if let Some(mirror) = github_mirror {
+        if url.contains("github.com") {
+            let mirrored_url = format!("{mirror}{url}");
+            info!("Applying GitHub mirror: {} -> {}", url, mirrored_url);
+            mirrored_url
+        } else {
+            url.to_string()
+        }
+    } else {
+        url.to_string()
+    };
 
     let download_path = if is_tarball {
         temp_dir.join(format!("deploy-bot-{}.tar.gz", version.replace('v', "")))
@@ -98,11 +111,11 @@ pub async fn download_binary(url: &str, version: &str) -> AppResult<PathBuf> {
         temp_dir.join(format!("deploy-bot-{}", version.replace('v', "")))
     };
 
-    info!("Downloading new binary from {url} to {}", download_path.display());
+    info!("Downloading new binary from {download_url} to {}", download_path.display());
 
     let client = reqwest::Client::new();
     let response = client
-        .get(url)
+        .get(&download_url)
         .send()
         .await
         .map_err(|e| AppError::Config(format!("Failed to download binary: {e}")))?;
@@ -281,8 +294,11 @@ pub async fn handle_self_update(
 
     info!("New version {new_version_str} is available, downloading...");
 
+    // Get GitHub mirror configuration
+    let github_mirror = state.config.server.github_mirror.as_deref();
+
     // Download new binary
-    let binary_path = download_binary(&payload.download_url, new_version_str).await?;
+    let binary_path = download_binary(&payload.download_url, new_version_str, github_mirror).await?;
 
     // Execute update script
     let script_path = state
@@ -376,5 +392,50 @@ mod tests {
         assert!(v4.gt(&v1)); // 1.0.0 > 0.2.0
         assert!(!v1.gt(&v3)); // 0.2.0 < 0.3.0
         assert!(!v1.gt(&v4)); // 0.2.0 < 1.0.0
+    }
+
+    /// Helper function to test mirror URL transformation
+    #[allow(dead_code)]
+    fn apply_github_mirror(url: &str, github_mirror: Option<&str>) -> String {
+        if let Some(mirror) = github_mirror {
+            if url.contains("github.com") {
+                return format!("{mirror}{url}");
+            }
+        }
+        url.to_string()
+    }
+
+    #[test]
+    fn test_github_mirror_applied_to_github_url() {
+        let url = "https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot";
+        let mirror = "https://ghproxy.com/";
+        let result = apply_github_mirror(url, Some(mirror));
+        assert_eq!(
+            result,
+            "https://ghproxy.com/https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot"
+        );
+    }
+
+    #[test]
+    fn test_github_mirror_not_applied_to_non_github_url() {
+        let url = "https://other-cdn.com/file.tar.gz";
+        let mirror = "https://ghproxy.com/";
+        let result = apply_github_mirror(url, Some(mirror));
+        assert_eq!(result, "https://other-cdn.com/file.tar.gz");
+    }
+
+    #[test]
+    fn test_no_mirror_returns_original_url() {
+        let url = "https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot";
+        let result = apply_github_mirror(url, None);
+        assert_eq!(result, "https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot");
+    }
+
+    #[test]
+    fn test_github_mirror_none_value() {
+        let url = "https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot";
+        let mirror: Option<&str> = None;
+        let result = apply_github_mirror(url, mirror);
+        assert_eq!(result, "https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot");
     }
 }

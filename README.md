@@ -44,6 +44,7 @@ docker_compose_path = "./docker-compose.yaml"
 | codeup_token | 否 | 阿里云 Codeup Webhook Token |
 | update_script | 否 | 自更新脚本路径 |
 | update_webhook_secret | 否 | 自更新 Webhook 验证密钥 |
+| github_mirror | 否 | GitHub 镜像地址（用于自更新下载加速） |
 
 ### 字段详细说明
 
@@ -339,6 +340,22 @@ systemctl start deploy-bot
 
 #### update_webhook_secret
 自更新 Webhook 验证密钥。用于验证更新请求的来源合法性。
+
+#### github_mirror
+GitHub 镜像地址。当配置后，自更新下载 GitHub Releases 二进制文件时会添加镜像前缀，解决 GitHub 在中国大陆地区访问不稳定的问题。
+
+```yaml
+github_mirror = "https://ghproxy.com/"  # 镜像地址，以斜杠结尾
+```
+
+**转换规则：**
+- 仅对包含 `github.com` 的 URL 应用镜像
+- 原 URL: `https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot`
+- 转换后: `https://ghproxy.com/https://github.com/owner/repo/releases/download/v1.0.0/deploy-bot`
+
+**常见镜像服务：**
+- `https://ghproxy.com/`
+- `https://mirror.ghproxy.com/`
 
 ### 2. GitHub Actions 配置
 
