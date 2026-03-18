@@ -50,7 +50,7 @@ fn strip_ansi_codes(s: &str) -> String {
 /// Returns Ok(()) if all services restart successfully, or Err with service name and error message
 async fn restart_docker_services(
     services: Vec<String>,
-    docker_compose_path: String,
+    docker_compose_paths: Vec<String>,
     docker_compose_command: Option<DockerComposeCommand>,
     deployment_manager: &Arc<DeploymentManager>,
     deployment_id: &str,
@@ -70,13 +70,17 @@ async fn restart_docker_services(
         let service_for_log = service.clone();
         deployment_manager.add_log(deployment_id, "info", &format!("Restarting service: {service_clone}"));
 
-        let compose_path_clone = docker_compose_path.clone();
+        let compose_paths_clone = docker_compose_paths.clone();
         let result = tokio::task::spawn_blocking(move || {
             let mut cmd = Command::new(docker_cmd);
             if docker_cmd == "docker" {
                 cmd.arg("compose");
             }
-            cmd.args(["-f", &compose_path_clone, "restart", &service]);
+            // Add multiple -f arguments for each compose file
+            for path in &compose_paths_clone {
+                cmd.args(["-f", path]);
+            }
+            cmd.args(["restart", &service]);
             cmd.output()
         })
         .await
@@ -104,7 +108,7 @@ async fn restart_docker_services(
 pub async fn execute_deployment(
     deployment: Deployment,
     workspace_dir: &str,
-    docker_compose_path: Option<&str>,
+    docker_compose_paths: Option<Vec<String>>,
     docker_compose_command: Option<DockerComposeCommand>,
     deployment_manager: Arc<DeploymentManager>,
 ) {
@@ -112,9 +116,9 @@ pub async fn execute_deployment(
     let project_name = deployment.project_name.clone();
 
     info!("Starting deployment for project: {}", project_name);
-    info!("docker_compose_path: {:?}, docker_service: {:?}", docker_compose_path, deployment.project.docker_service);
+    info!("docker_compose_paths: {:?}, docker_service: {:?}", docker_compose_paths, deployment.project.docker_service);
     deployment_manager.add_log(&deployment_id, "info", &format!("Starting deployment for project: {project_name}"));
-    deployment_manager.add_log(&deployment_id, "info", &format!("docker_compose_path: {:?}, docker_service: {:?}", docker_compose_path, deployment.project.docker_service));
+    deployment_manager.add_log(&deployment_id, "info", &format!("docker_compose_paths: {:?}, docker_service: {:?}", docker_compose_paths, deployment.project.docker_service));
 
     // Update status to Running
     deployment_manager.update_status(&deployment_id, DeploymentStatus::Running);
@@ -165,7 +169,7 @@ pub async fn execute_deployment(
         &project.project_type,
         project.install_command.as_deref(),
         &project.env,
-        docker_compose_path,
+        docker_compose_paths.as_deref(),
         docker_compose_command,
         project.docker_service.as_deref(),
         project.working_dir.as_deref(),
@@ -202,7 +206,7 @@ pub async fn execute_deployment(
         &project.project_type,
         project.build_command.as_deref(),
         &project.env,
-        docker_compose_path,
+        docker_compose_paths.as_deref(),
         docker_compose_command,
         project.docker_service.as_deref(),
         project.working_dir.as_deref(),
@@ -238,7 +242,7 @@ pub async fn execute_deployment(
             &project_dir,
             extra_cmd,
             &project.env,
-            docker_compose_path,
+            docker_compose_paths.as_deref(),
             docker_compose_command,
             project.docker_service.as_deref(),
             project.working_dir.as_deref(),
@@ -269,15 +273,15 @@ pub async fn execute_deployment(
 
     // Step 5: Restart Docker services if configured
     let services_to_restart = project.restart_service.to_services();
-    info!("Checking restart_service: services_to_restart={:?}, docker_compose_path={:?}, docker_compose_command={:?}",
-        services_to_restart, docker_compose_path, docker_compose_command);
+    info!("Checking restart_service: services_to_restart={:?}, docker_compose_paths={:?}, docker_compose_command={:?}",
+        services_to_restart, docker_compose_paths, docker_compose_command);
     if !services_to_restart.is_empty() {
-        if let Some(compose_path) = docker_compose_path {
+        if let Some(ref compose_paths) = docker_compose_paths {
             if let Some(compose_cmd) = docker_compose_command {
                 deployment_manager.add_log(&deployment_id, "info", &format!("Restarting {} Docker service(s)...", services_to_restart.len()));
                 match restart_docker_services(
                     services_to_restart,
-                    compose_path.to_string(),
+                    compose_paths.clone(),
                     Some(compose_cmd),
                     &deployment_manager,
                     &deployment_id,
@@ -396,6 +400,7 @@ mod tests {
                 run_user: None,
                 env: HashMap::new(),
                 restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
             },
             status: DeploymentStatus::Pending,
             created_at: chrono::Utc::now(),
@@ -414,7 +419,7 @@ mod tests {
             let _ = execute_deployment(
                 deployment,
                 &workspace_base,
-                Some("./docker-compose.yaml"),  // docker_compose_path = Some
+                Some(vec!["./docker-compose.yaml".to_string()]),  // docker_compose_paths = Some
                 Some(DockerComposeCommand::DockerCompose),  // docker_compose_command
                 std::sync::Arc::new(manager),
             ).await;
@@ -450,6 +455,7 @@ mod tests {
                 run_user: None,
                 env: HashMap::new(),
                 restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
             },
             status: DeploymentStatus::Pending,
             created_at: chrono::Utc::now(),

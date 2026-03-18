@@ -182,6 +182,7 @@ impl Database {
             run_user: row.get(14).ok(),
             env: std::collections::HashMap::new(),
             restart_service: crate::project_config::RestartService::None,
+            docker_compose_path: crate::config::DockerComposePaths::None,
         };
 
         Ok(Deployment {
@@ -304,6 +305,7 @@ mod tests {
                 run_user: None,
                 env: std::collections::HashMap::new(),
                 restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
             },
             status: DeploymentStatus::Pending,
             created_at: Utc::now(),
@@ -343,6 +345,7 @@ mod tests {
                 run_user: None,
                 env: std::collections::HashMap::new(),
                 restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
             },
             status: DeploymentStatus::Success,
             created_at: Utc::now(),
@@ -378,6 +381,7 @@ mod tests {
                 run_user: None,
                 env: std::collections::HashMap::new(),
                 restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
             },
             status: DeploymentStatus::Failed,
             created_at: Utc::now(),
@@ -416,6 +420,7 @@ mod tests {
                 run_user: None,
                 env: std::collections::HashMap::new(),
                 restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
             },
             status: DeploymentStatus::Pending,
             created_at: Utc::now(),

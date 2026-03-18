@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::config::ProjectType;
+use crate::config::{ProjectType, DockerComposePaths};
 
 /// Docker 服务重启配置，支持字符串和数组两种格式
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -46,6 +46,10 @@ pub struct ProjectConfig {
     /// Docker 服务重启配置，部署完成后串行重启指定的服务
     #[serde(default)]
     pub restart_service: RestartService,
+    /// Docker compose 配置文件路径，支持字符串或数组格式
+    /// .deploy.yaml 中的此配置会覆盖 config.yaml 的配置
+    #[serde(default)]
+    pub docker_compose_path: DockerComposePaths,
 }
 
 impl ProjectConfig {

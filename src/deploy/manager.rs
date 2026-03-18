@@ -402,6 +402,7 @@ mod tests {
             run_user: None,
             env: HashMap::new(),
             restart_service: crate::project_config::RestartService::None,
+            docker_compose_path: crate::config::DockerComposePaths::None,
         }
     }
 

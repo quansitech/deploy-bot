@@ -51,9 +51,30 @@ docker_compose_path = "./docker-compose.yaml"
 #### docker_compose_path
 Docker Compose 文件路径。设置后，支持使用 Docker 容器执行安装和构建命令。
 
+**支持两种格式：**
+
 ```yaml
-docker_compose_path = "./docker-compose.yaml"  # 使用 Docker Compose
-# docker_compose_path = null                  # 不使用 Docker，在宿主机执行
+# 单个文件（字符串）
+docker_compose_path = "./docker-compose.yaml"
+
+# 多个文件（数组），按顺序覆盖配置
+docker_compose_path = ["./docker-compose.yaml", "./docker-compose.override.yaml"]
+
+# 不使用 Docker，在宿主机执行
+# docker_compose_path = null
+```
+
+**多文件使用场景：**
+- 基础配置文件 + 环境覆盖配置
+- 例如：`["./docker-compose.yaml", "./docker-compose.prod.yaml"]`
+
+**生成的 Docker 命令示例：**
+```bash
+# 单文件
+docker compose -f ./docker-compose.yaml run --rm php sh -c "命令"
+
+# 多文件
+docker compose -f ./docker-compose.yaml -f ./docker-compose.override.yaml run --rm php sh -c "命令"
 ```
 
 **使用条件：**
@@ -92,6 +113,7 @@ project_type = "nodejs"
 # build_command = "npm run build"
 # env = { NODE_ENV = "production" }
 # restart_service = "web"       # 可选：部署完成后重启 Docker 服务
+# docker_compose_path = ["./docker-compose.yaml", "./docker-compose.override.yaml"]  # 可选：覆盖 config.yaml 中的 Docker Compose 配置
 ```
 
 ### 3. 启动服务
@@ -132,6 +154,7 @@ cargo build --release
 | extra_command | 否 | 部署完成后执行的额外命令 |
 | env | 否 | 环境变量（键值对） |
 | restart_service | 否 | 部署完成后需要重启的 Docker 服务 |
+| docker_compose_path | 否 | Docker Compose 文件路径（会覆盖 config.yaml 的配置） |
 
 ### 字段详细说明
 
@@ -212,6 +235,26 @@ restart_service = ["web", "worker"]
 - 需要在 `config.yaml` 中配置 `docker_compose_path`
 - 服务名称必须存在于 docker-compose.yml 中
 - 重启失败会导致部署失败
+
+#### docker_compose_path (.deploy.yaml)
+在项目级别覆盖 `config.yaml` 中的 Docker Compose 配置。
+
+```yaml
+# 单个文件覆盖
+docker_compose_path = "/path/to/docker-compose.yaml"
+
+# 多个文件覆盖（按顺序）
+docker_compose_path = ["/path/to/base.yaml", "/path/to/override.yaml"]
+```
+
+**优先级规则：**
+1. `.deploy.yaml` 中的 `docker_compose_path` **优先**于 `config.yaml` 中的配置
+2. 如果 `.deploy.yaml` 未设置此字段，则使用 `config.yaml` 的配置
+3. 支持单个文件（字符串）或多个文件（数组）格式
+
+**使用场景：**
+- 不同环境使用不同的 Docker Compose 配置
+- 基础配置 + 环境特定覆盖
 
 #### project_type 默认行为
 不同项目类型的默认安装和构建命令：

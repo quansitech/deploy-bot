@@ -15,7 +15,7 @@ pub async fn run_build(
     project_type: &ProjectType,
     custom_command: Option<&str>,
     env_vars: &std::collections::HashMap<String, String>,
-    docker_compose_path: Option<&str>,
+    docker_compose_paths: Option<&[String]>,
     docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
@@ -27,7 +27,7 @@ pub async fn run_build(
             project_dir,
             cmd,
             env_vars,
-            docker_compose_path,
+            docker_compose_paths,
             docker_compose_command,
             docker_service,
             working_dir,
@@ -43,7 +43,7 @@ pub async fn run_build(
                 project_dir,
                 "npm run build",
                 env_vars,
-                docker_compose_path,
+                docker_compose_paths,
                 docker_compose_command,
                 docker_service,
                 working_dir,
@@ -53,7 +53,7 @@ pub async fn run_build(
         }
         ProjectType::Rust => build_rust(project_dir, run_user).await,
         ProjectType::Python => {
-            build_python(project_dir, docker_compose_path, docker_compose_command, docker_service, working_dir, run_user).await
+            build_python(project_dir, docker_compose_paths, docker_compose_command, docker_service, working_dir, run_user).await
         }
         ProjectType::Php => {
             Ok(String::new()) // PHP doesn't need build
@@ -89,7 +89,7 @@ async fn build_rust(project_dir: &Path, _run_user: Option<&str>) -> Result<Strin
 /// Build Python project
 async fn build_python(
     project_dir: &Path,
-    docker_compose_path: Option<&str>,
+    docker_compose_paths: Option<&[String]>,
     docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
@@ -101,7 +101,7 @@ async fn build_python(
             project_dir,
             "python setup.py bdist_wheel",
             &std::collections::HashMap::new(),
-            docker_compose_path,
+            docker_compose_paths,
             docker_compose_command,
             docker_service,
             working_dir,
@@ -117,7 +117,7 @@ async fn build_python(
             project_dir,
             "python -m build",
             &std::collections::HashMap::new(),
-            docker_compose_path,
+            docker_compose_paths,
             docker_compose_command,
             docker_service,
             working_dir,
@@ -138,7 +138,7 @@ pub async fn run_command(
     project_dir: &Path,
     command: &str,
     env_vars: &std::collections::HashMap<String, String>,
-    docker_compose_path: Option<&str>,
+    docker_compose_paths: Option<&[String]>,
     docker_compose_command: Option<DockerComposeCommand>,
     docker_service: Option<&str>,
     working_dir: Option<&str>,
@@ -148,7 +148,7 @@ pub async fn run_command(
         project_dir,
         command,
         env_vars,
-        docker_compose_path,
+        docker_compose_paths,
         docker_compose_command,
         docker_service,
         working_dir,

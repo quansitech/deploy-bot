@@ -17,7 +17,8 @@ pub struct ServerConfig {
     pub gitlab_token: Option<String>,
     pub codeup_token: Option<String>,
     pub workspace_dir: String,
-    pub docker_compose_path: Option<String>,
+    #[serde(default)]
+    pub docker_compose_path: DockerComposePaths,
     /// Detected docker compose command (None if docker_compose_path is not set)
     pub docker_compose_command: Option<DockerComposeCommand>,
     /// Path to the update script for self-update functionality
@@ -41,6 +42,53 @@ pub enum ProjectType {
     Custom,
 }
 
+/// Docker Compose 配置文件路径，支持字符串或数组格式
+/// 使用 serde untagged 兼容两种格式
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(untagged)]
+pub enum DockerComposePaths {
+    #[default]
+    None,
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl DockerComposePaths {
+    /// 检查是否配置了路径
+    pub fn is_empty(&self) -> bool {
+        match self {
+            DockerComposePaths::None => true,
+            DockerComposePaths::Single(_) => false,
+            DockerComposePaths::Multiple(v) => v.is_empty(),
+        }
+    }
+
+    /// 获取所有路径的Vec格式
+    pub fn to_vec(&self) -> Vec<String> {
+        match self {
+            DockerComposePaths::None => vec![],
+            DockerComposePaths::Single(s) => vec![s.clone()],
+            DockerComposePaths::Multiple(v) => v.clone(),
+        }
+    }
+
+    /// 合并项目级配置和全局配置
+    /// 项目级配置优先，如果为空则使用全局配置
+    pub fn merge(project_paths: &DockerComposePaths, global_paths: &DockerComposePaths) -> Option<Vec<String>> {
+        let project_vec = project_paths.to_vec();
+        if !project_vec.is_empty() {
+            // 项目级配置优先
+            Some(project_vec)
+        } else if !global_paths.is_empty() {
+            // 回退到全局配置
+            Some(global_paths.to_vec())
+        } else {
+            // 两者都为空
+            None
+        }
+    }
+}
+
 /// Docker Compose command type
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum DockerComposeCommand {
@@ -53,8 +101,8 @@ pub enum DockerComposeCommand {
 impl DockerComposeCommand {
     /// Detect available docker compose command
     /// Returns None if docker_compose_path is not set
-    pub fn detect(docker_compose_path: &Option<String>) -> Option<Self> {
-        if docker_compose_path.is_none() {
+    pub fn detect(docker_compose_path: &DockerComposePaths) -> Option<Self> {
+        if docker_compose_path.is_empty() {
             return None;
         }
 
@@ -171,7 +219,7 @@ docker_compose_path = "./docker-compose.yaml"
         assert_eq!(config.server.port, 8080);
         assert_eq!(
             config.server.docker_compose_path,
-            Some("./docker-compose.yaml".to_string())
+            DockerComposePaths::Single("./docker-compose.yaml".to_string())
         );
     }
 
@@ -208,7 +256,7 @@ workspace_dir = "/var/workspace"
             config.server.codeup_token,
             Some("codeup-token".to_string())
         );
-        assert_eq!(config.server.docker_compose_path, None);
+        assert_eq!(config.server.docker_compose_path, DockerComposePaths::None);
     }
 
     #[test]
@@ -269,5 +317,89 @@ workspace_dir = "/var/workspace"
 
         let result = Config::load(file.path().to_str().unwrap());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_docker_compose_paths_merge_project_overrides_global() {
+        // 项目级配置覆盖全局配置
+        let project = DockerComposePaths::Single("/project/compose.yaml".to_string());
+        let global = DockerComposePaths::Single("/global/compose.yaml".to_string());
+
+        let result = DockerComposePaths::merge(&project, &global);
+
+        assert_eq!(result, Some(vec!["/project/compose.yaml".to_string()]));
+    }
+
+    #[test]
+    fn test_docker_compose_paths_merge_fallback_to_global() {
+        // 项目级配置为空时，使用全局配置
+        let project = DockerComposePaths::None;
+        let global = DockerComposePaths::Single("/global/compose.yaml".to_string());
+
+        let result = DockerComposePaths::merge(&project, &global);
+
+        assert_eq!(result, Some(vec!["/global/compose.yaml".to_string()]));
+    }
+
+    #[test]
+    fn test_docker_compose_paths_merge_both_empty() {
+        // 两者都为空时返回 None
+        let project = DockerComposePaths::None;
+        let global = DockerComposePaths::None;
+
+        let result = DockerComposePaths::merge(&project, &global);
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_docker_compose_paths_merge_multiple_files() {
+        // 多个配置文件
+        let project = DockerComposePaths::Multiple(vec![
+            "/project/base.yaml".to_string(),
+            "/project/override.yaml".to_string(),
+        ]);
+        let global = DockerComposePaths::Single("/global/compose.yaml".to_string());
+
+        let result = DockerComposePaths::merge(&project, &global);
+
+        assert_eq!(result, Some(vec![
+            "/project/base.yaml".to_string(),
+            "/project/override.yaml".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn test_docker_compose_paths_merge_project_multiple_overrides_global_single() {
+        // 项目级多个文件覆盖全局单个文件
+        let project = DockerComposePaths::Multiple(vec![
+            "/project/a.yaml".to_string(),
+            "/project/b.yaml".to_string(),
+        ]);
+        let global = DockerComposePaths::Single("/global/compose.yaml".to_string());
+
+        let result = DockerComposePaths::merge(&project, &global);
+
+        assert_eq!(result, Some(vec![
+            "/project/a.yaml".to_string(),
+            "/project/b.yaml".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn test_docker_compose_paths_merge_global_multiple_fallback() {
+        // 全局多个文件，项目为空时的回退
+        let project = DockerComposePaths::None;
+        let global = DockerComposePaths::Multiple(vec![
+            "/global/base.yaml".to_string(),
+            "/global/prod.yaml".to_string(),
+        ]);
+
+        let result = DockerComposePaths::merge(&project, &global);
+
+        assert_eq!(result, Some(vec![
+            "/global/base.yaml".to_string(),
+            "/global/prod.yaml".to_string(),
+        ]));
     }
 }

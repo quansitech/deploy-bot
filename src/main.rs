@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
             info!("Docker compose command: docker-compose (legacy, detected)");
         }
         None => {
-            if config.server.docker_compose_path.is_some() {
+            if !config.server.docker_compose_path.is_empty() {
                 warn!("Docker compose path configured but no docker compose command detected!");
             }
         }
@@ -109,10 +109,16 @@ async fn main() -> anyhow::Result<()> {
         loop {
             if let Some(task) = worker_deployment_manager.pop_deployment() {
                 info!("Worker: processing deployment {}", task.id);
+                // Merge project config docker_compose_path with global config
+                // Project-level config overrides global config
+                let final_paths = config::DockerComposePaths::merge(
+                    &task.project.docker_compose_path,
+                    &worker_docker_compose_path,
+                );
                 executor::execute_deployment(
                     task,
                     &worker_workspace_dir,
-                    worker_docker_compose_path.as_deref(),
+                    final_paths,
                     worker_docker_compose_command,
                     worker_deployment_manager.clone(),
                 ).await;
