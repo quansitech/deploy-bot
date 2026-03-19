@@ -1,0 +1,13 @@
+[Unit]
+Description=Deploy Bot Webhook Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/deploy-bot/deploy-bot
+WorkingDirectory=/opt/deploy-bot
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

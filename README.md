@@ -127,6 +127,86 @@ cargo build --release
 ./target/release/deploy-bot
 ```
 
+### 3.2 安装为系统服务
+
+将 deploy-bot 安装为系统守护进程，实现开机自启和进程管理。
+
+#### 标准目录布局
+
+```
+/opt/deploy-bot/
+├── deploy-bot       # 二进制文件
+├── config.yaml       # 配置文件
+└── logs/             # 日志目录（SysV init 使用）
+```
+
+**首次安装时需创建目录：**
+```bash
+sudo mkdir -p /opt/deploy-bot/{logs}
+```
+
+#### systemd (Ubuntu 15.04+ / Debian 8+)
+
+1. 复制 unit 文件并重载：
+   ```bash
+   sudo cp scripts/deploy-bot.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   ```
+
+2. 启动服务：
+   ```bash
+   sudo systemctl start deploy-bot
+   ```
+
+3. 开机自启（可选）：
+   ```bash
+   sudo systemctl enable deploy-bot
+   ```
+
+**管理命令：**
+```bash
+sudo systemctl start deploy-bot   # 启动
+sudo systemctl stop deploy-bot    # 停止
+sudo systemctl restart deploy-bot  # 重启
+sudo systemctl status deploy-bot   # 状态
+journalctl -u deploy-bot           # 查看日志
+```
+
+#### SysV init (Ubuntu 14.04- / Debian 7-)
+
+1. 复制 init 脚本：
+   ```bash
+   sudo cp scripts/deploy-bot.init /etc/init.d/deploy-bot
+   sudo chmod +x /etc/init.d/deploy-bot
+   ```
+
+2. 启动服务：
+   ```bash
+   sudo service deploy-bot start
+   ```
+
+3. 开机自启（可选）：
+   ```bash
+   sudo update-rc.d deploy-bot defaults
+   ```
+
+**管理命令：**
+```bash
+sudo service deploy-bot start   # 启动
+sudo service deploy-bot stop    # 停止
+sudo service deploy-bot restart  # 重启
+sudo service deploy-bot status   # 状态
+cat /opt/deploy-bot/logs/deploy-bot.log  # 查看日志
+```
+
+#### 二进制部署
+
+将构建好的二进制文件复制到目标位置：
+```bash
+sudo cp target/release/deploy-bot /opt/deploy-bot/deploy-bot
+sudo chmod +x /opt/deploy-bot/deploy-bot
+```
+
 ### 4. 配置 Webhook
 
 在 GitHub/GitLab/Codeup 仓库设置 Webhook：
@@ -262,7 +342,7 @@ docker_compose_path = ["/path/to/base.yaml", "/path/to/override.yaml"]
 | 项目类型 | 默认安装命令 | 默认构建命令 | 说明 |
 |----------|--------------|--------------|------|
 | **nodejs** | 自动检测：pnpm > yarn > npm | `npm run build` | 根据 lock 文件自动选择包管理器 |
-| **python** | 自动检测：poetry > pip | 无（Python 无需构建） | poetry.lock 优先，否则安装 requirements.txt |
+| **python** | poetry > venv + pip | 无（Python 无需构建） | poetry.lock 优先；否则使用虚拟环境 .venv 安装 |
 | **php** | `composer install --no-dev` | 无（PHP 无需构建） | - |
 | **rust** | 无（cargo build 自动处理依赖） | `cargo build --release` | 构建阶段自动处理依赖 |
 | **custom** | 无 | 无 | 需要手动指定 install_command 和 build_command |
@@ -281,7 +361,10 @@ project_type = "nodejs"
 # Python 项目
 project_type = "python"
 # 安装: poetry install (如果有 poetry.lock)
-#     或 pip install -r requirements.txt (如果有 requirements.txt)
+#     或使用虚拟环境安装 requirements.txt (deploy-bot 自动处理)
+#
+# 虚拟环境说明：Python 项目默认使用 .venv 虚拟环境安装依赖，
+# 这样不需要系统 site-packages 写权限，也避免了容器内 HOME 环境变量问题。
 
 # PHP 项目
 project_type = "php"

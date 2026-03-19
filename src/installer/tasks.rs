@@ -92,7 +92,7 @@ async fn install_rust(_project_dir: &Path) -> Result<String, AppError> {
     Ok(String::new())
 }
 
-/// Install Python dependencies
+/// Install Python dependencies using venv
 async fn install_python(
     project_dir: &Path,
     docker_compose_paths: Option<&[String]>,
@@ -118,11 +118,23 @@ async fn install_python(
         .await;
     }
 
-    // Fall back to pip
+    // Use venv for requirements.txt
     if project_dir.join("requirements.txt").exists() {
+        // Check if venv already exists
+        let venv_exists = project_dir.join(".venv").exists();
+
+        // Build command: create venv if needed, then install dependencies
+        let command = if venv_exists {
+            // Venv exists, just install dependencies (use . instead of source for sh compatibility)
+            ". .venv/bin/activate && pip install -r requirements.txt"
+        } else {
+            // Create venv first, then install (use . instead of source for sh compatibility)
+            "python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt"
+        };
+
         return run_command(
             project_dir,
-            "pip install -r requirements.txt",
+            command,
             &std::collections::HashMap::new(),
             docker_compose_paths,
             docker_compose_command,
