@@ -188,6 +188,55 @@ pub async fn download_binary(url: &str, version: &str, github_mirror: Option<&st
     Ok(binary_path)
 }
 
+/// Get the payload file path for replay updates
+fn get_payload_path() -> AppResult<PathBuf> {
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| AppError::Config(format!("Failed to get executable path: {e}")))?
+        .parent()
+        .ok_or_else(|| AppError::Config("Failed to get executable directory".to_string()))?
+        .to_path_buf();
+
+    Ok(exe_dir.join(".deploy-last-payload").join("deploy-bot-last-update.json"))
+}
+
+/// Save the update payload to a file for replay
+pub fn save_update_payload(payload: &ReleasePayload) -> AppResult<()> {
+    let payload_path = get_payload_path()?;
+
+    // Create directory if it doesn't exist
+    if let Some(parent) = payload_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Config(format!("Failed to create payload directory: {e}")))?;
+    }
+
+    // Serialize and save payload
+    let json = serde_json::to_string_pretty(payload)
+        .map_err(|e| AppError::Config(format!("Failed to serialize payload: {e}")))?;
+
+    std::fs::write(&payload_path, json)
+        .map_err(|e| AppError::Config(format!("Failed to write payload file: {e}")))?;
+
+    info!("Update payload saved to {}", payload_path.display());
+    Ok(())
+}
+
+/// Load the update payload from file for replay
+pub fn load_update_payload() -> AppResult<ReleasePayload> {
+    let payload_path = get_payload_path()?;
+
+    if !payload_path.exists() {
+        return Err(AppError::Config(
+            "No update payload found. Please trigger an update webhook first.".to_string(),
+        ));
+    }
+
+    let json = std::fs::read_to_string(&payload_path)
+        .map_err(|e| AppError::Config(format!("Failed to read payload file: {e}")))?;
+
+    serde_json::from_str(&json)
+        .map_err(|e| AppError::Config(format!("Failed to parse payload file: {e}")))
+}
+
 /// Execute update script
 pub fn execute_update_script(script_path: &str, new_binary_path: &Path) -> AppResult<()> {
     info!(
@@ -285,11 +334,20 @@ pub async fn handle_self_update(
             current_version.major, current_version.minor, current_version.patch
         );
         info!("{msg}");
+        // Still save the payload even if version is not newer
+        if let Err(e) = save_update_payload(&payload) {
+            warn!("Failed to save update payload: {e}");
+        }
         return Ok(Json(UpdateResponse {
             message: msg,
             updated: false,
             version: Some(new_version_str.to_string()),
         }));
+    }
+
+    // Save payload for replay before downloading
+    if let Err(e) = save_update_payload(&payload) {
+        warn!("Failed to save update payload: {e}");
     }
 
     info!("New version {new_version_str} is available, downloading...");

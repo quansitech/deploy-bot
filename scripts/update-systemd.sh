@@ -26,6 +26,7 @@ fi
 
 echo "Stopping $SERVICE_NAME service..."
 systemctl stop "$SERVICE_NAME"
+sleep 2
 
 echo "Replacing binary..."
 cp "$NEW_BINARY" "$BINARY_PATH"

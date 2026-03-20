@@ -538,6 +538,32 @@ Response:
 }
 ```
 
+### 6. 本地重放更新
+
+当收到自更新 webhook 时，deploy-bot 会自动保存 payload 到本地文件。可以通过 CLI 命令重放更新流程，用于测试自更新功能。
+
+#### 保存位置
+
+Payload 保存在 `{binary_dir}/.deploy-last-payload/deploy-bot-last-update.json`
+
+例如：二进制文件在 `/opt/deploy-bot/deploy-bot`，则 payload 保存在 `/opt/deploy-bot/.deploy-last-payload/deploy-bot-last-update.json`
+
+#### 重放命令
+
+```bash
+# 强制重放（跳过版本检查）
+deploy-bot replay-update --force
+
+# 非强制重放（会检查版本号）
+deploy-bot replay-update
+```
+
+#### 使用场景
+
+- 测试自更新流程时，无需发布假 release
+- 验证 update_script 是否正常工作
+- 下载链接是否有效
+
 ## 构建
 
 ```bash

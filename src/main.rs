@@ -45,6 +45,10 @@ async fn main() -> anyhow::Result<()> {
             show_migration_status().await?;
             return Ok(());
         }
+        Some(Command::ReplayUpdate { force }) => {
+            replay_update(*force).await?;
+            return Ok(());
+        }
         None | Some(Command::Server) => {
             // Default: start the server
         }
@@ -215,5 +219,74 @@ async fn show_migration_status() -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Replay the last self-update process
+async fn replay_update(force: bool) -> anyhow::Result<()> {
+    // Initialize logging to stdout
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .init();
+
+    info!("Loading config...");
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Failed to get executable path: {e}"))?
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Failed to get executable directory"))?
+        .to_path_buf();
+    let config_path = exe_dir.join("config.yaml");
+    let config = config::Config::load(config_path.to_str().unwrap())
+        .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
+
+    // Check if update_script is configured
+    if !config.server.is_update_script_configured() {
+        return Err(anyhow::anyhow!("Update script not configured"));
+    }
+
+    // Load payload
+    info!("Loading update payload...");
+    let payload = self_update::load_update_payload()?;
+
+    println!("Replaying update for version: {}", payload.tag_name);
+
+    // Check version unless force is enabled
+    if !force {
+        match self_update::is_newer_version(&payload.tag_name) {
+            Ok(true) => {
+                println!("Version {} is newer, proceeding with update", payload.tag_name);
+            }
+            Ok(false) => {
+                return Err(anyhow::anyhow!(
+                    "Current version is already up to date or newer than {}. Use --force to replay anyway.",
+                    payload.tag_name
+                ));
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to check version: {e}"));
+            }
+        }
+    } else {
+        println!("Force mode: skipping version check");
+    }
+
+    // Get GitHub mirror configuration
+    let github_mirror = config.server.github_mirror.as_deref();
+
+    // Download new binary
+    info!("Downloading new binary from {}...", payload.download_url);
+    let binary_path = self_update::download_binary(&payload.download_url, &payload.tag_name, github_mirror).await?;
+
+    // Execute update script
+    let script_path = config
+        .server
+        .update_script
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("Update script not configured"))?;
+
+    info!("Executing update script: {} with binary: {}", script_path, binary_path.display());
+    self_update::execute_update_script(script_path, &binary_path)?;
+
+    println!("Update replay completed successfully!");
     Ok(())
 }

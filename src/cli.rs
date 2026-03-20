@@ -21,6 +21,12 @@ pub enum Command {
     Migrate,
     /// Show database migration status
     MigrateStatus,
+    /// Replay the last self-update process
+    ReplayUpdate {
+        /// Force replay even if version is not newer
+        #[arg(long)]
+        force: bool,
+    },
     /// Start the HTTP server (default)
     Server,
 }
