@@ -25,7 +25,7 @@ if [ ! -f "$NEW_BINARY" ]; then
 fi
 
 echo "Stopping $SERVICE_NAME service..."
-systemctl stop "$SERVICE_NAME"
+systemctl stop "$SERVICE_NAME" || true
 sleep 2
 
 echo "Replacing binary..."
