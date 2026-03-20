@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tokio::io::AsyncWriteExt;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::error::{AppError, AppResult};
 use crate::webhook::handler::WebhookAppState;
@@ -244,29 +244,40 @@ pub fn execute_update_script(script_path: &str, new_binary_path: &Path) -> AppRe
         new_binary_path.display()
     );
 
-    // Fork and execute the update script
-    // The script will handle stopping the old process, replacing the binary, and starting the new one
-    let output = Command::new(script_path)
-        .arg(new_binary_path.to_str().unwrap_or(""))
+    // Check if systemd-run is available (for systemd-based systems)
+    // and use it to escape the cgroup. Otherwise fall back to setsid.
+    let use_systemd_run = Command::new("systemd-run")
+        .arg("--version")
         .output()
-        .map_err(|e| AppError::Config(format!("Failed to execute update script: {e}")))?;
+        .map(|o| o.status.success())
+        .unwrap_or(false);
 
-    // Log stdout output
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if !stdout.is_empty() {
-        info!("Update script stdout: {}", stdout);
-    }
-
-    if output.status.success() {
-        info!("Update script executed successfully");
-        Ok(())
+    let _child = if use_systemd_run {
+        // Use systemd-run to start the update script in a separate systemd service.
+        // This is critical because:
+        // 1. It escapes deploy-bot.service's cgroup, avoiding KillMode=control-group cleanup
+        // 2. The script runs as a fully independent temporary service
+        info!("Using systemd-run to start update script");
+        Command::new("systemd-run")
+            .args([
+                "--unit=deploy-bot-updater",
+                "--",
+                "/bin/bash",
+                script_path,
+                new_binary_path.to_str().unwrap_or(""),
+            ])
+            .spawn()
     } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        error!("Update script failed: {stderr}");
-        Err(AppError::Config(format!(
-            "Update script failed: {stderr}"
-        )))
+        // Fall back to setsid for non-systemd systems
+        info!("systemd-run not available, using setsid");
+        Command::new("setsid")
+            .args([script_path, new_binary_path.to_str().unwrap_or("")])
+            .spawn()
     }
+    .map_err(|e| AppError::Config(format!("Failed to spawn update script: {e}")))?;
+
+    info!("Update script started");
+    Ok(())
 }
 
 /// Handle self-update webhook
@@ -378,17 +389,14 @@ pub async fn handle_self_update(
     let binary_path_owned = binary_path.clone();
 
     // Spawn a thread to run the update (so we can return a response before the process is killed)
-    // Note: After the process is stopped, this thread's logs won't be captured
+    // The script runs in a new session via setsid, so it continues even after parent exits
     std::thread::spawn(move || {
-        // Note: logging here may not work after parent process is stopped
         if let Err(e) = execute_update_script(&script_path_owned, &binary_path_owned) {
             eprintln!("Update failed: {e}"); // Print to stderr as fallback
         }
     });
 
-    // Give a brief moment for the thread to start
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
+    // Return immediately without waiting - the spawned thread handles the update
     Ok(Json(UpdateResponse {
         message: format!("Update to {new_version_str} initiated"),
         updated: true,
