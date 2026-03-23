@@ -140,6 +140,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/deploy/:id", get(web_ui::show_deployment))
         .route("/deploy/:id/delete", post(web_ui::delete_deployment))
         .route("/deploy/:id/retry", post(web_ui::retry_deployment))
+        // API routes
+        .route("/api/deployments", get(web_ui::deployments_api))
         // Webhook route
         .route("/webhook/:project_name", post(webhook::handler::handle_webhook))
         // Self-update route

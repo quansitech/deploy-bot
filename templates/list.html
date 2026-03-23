@@ -46,3 +46,68 @@
 
 <p><a href="/">刷新</a></p>
 {% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const PAGE_SIZE = 20;
+    let currentPage = 1;
+    let loading = false;
+    let exhausted = false;
+
+    // Parse current page from URL
+    function getCurrentPageFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        return parseInt(params.get('page')) || 1;
+    }
+
+    // Check if near bottom of page
+    function nearBottom() {
+        const scrollTop = window.scrollY || document.documentElement.scrollTop;
+        const windowHeight = window.innerHeight;
+        const documentHeight = document.documentElement.scrollHeight;
+        return scrollTop + windowHeight >= documentHeight - 200;
+    }
+
+    // Load next page via API
+    async function loadNextPage() {
+        if (loading || exhausted) return;
+
+        loading = true;
+        currentPage++;
+
+        try {
+            const resp = await fetch(`/api/deployments?page=${currentPage}`);
+            const html = await resp.text();
+
+            if (html.trim() === '') {
+                exhausted = true;
+                currentPage--;
+            } else {
+                document.querySelector('tbody').insertAdjacentHTML('beforeend', html);
+                history.replaceState({}, '', `/?page=${currentPage}`);
+            }
+        } catch (e) {
+            console.error('Failed to load next page:', e);
+            currentPage--;
+        }
+
+        loading = false;
+    }
+
+    // Scroll handler with debounce
+    let scrollTimeout;
+    window.addEventListener('scroll', () => {
+        if (scrollTimeout) clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            if (nearBottom()) {
+                loadNextPage();
+            }
+        }, 100);
+    });
+
+    // Initialize current page from URL
+    currentPage = getCurrentPageFromUrl();
+})();
+</script>
+{% endblock %}

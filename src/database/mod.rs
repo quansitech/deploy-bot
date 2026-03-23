@@ -127,6 +127,7 @@ impl Database {
     }
 
     /// Get all deployments
+    #[allow(dead_code)]
     pub fn get_all_deployments(&self) -> SqliteResult<Vec<Deployment>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
@@ -144,6 +145,39 @@ impl Database {
         }
 
         Ok(deployments)
+    }
+
+    /// Get deployments paginated
+    pub fn get_deployments_paginated(&self, page: u32, page_size: u32) -> SqliteResult<Vec<Deployment>> {
+        let conn = self.conn.lock();
+        let offset = (page - 1) * page_size;
+        let mut stmt = conn.prepare(
+            "SELECT id, project_name, repo_url, branch, project_type, status,
+                install_command, build_command, extra_command, docker_service, working_dir,
+                created_at, started_at, finished_at
+             FROM deployments ORDER BY created_at DESC LIMIT ?1 OFFSET ?2"
+        )?;
+
+        let mut deployments = Vec::new();
+        let mut rows = stmt.query(params![page_size, offset])?;
+
+        while let Some(row) = rows.next()? {
+            deployments.push(self.row_to_deployment(row)?);
+        }
+
+        Ok(deployments)
+    }
+
+    /// Get total count of deployments
+    #[allow(dead_code)]
+    pub fn get_deployments_count(&self) -> SqliteResult<i64> {
+        let conn = self.conn.lock();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM deployments",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count)
     }
 
     /// Delete deployment by ID
@@ -436,5 +470,92 @@ mod tests {
         let logs = db.get_deployment_logs("test-id-4").unwrap();
         assert_eq!(logs.len(), 2);
         assert_eq!(logs[0].message, "Starting deployment");
+    }
+
+    #[test]
+    fn test_get_deployments_paginated() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+
+        let db = Database::new(&db_path).unwrap();
+
+        // Insert 5 deployments with different created_at times
+        for i in 0..5 {
+            let deployment = Deployment {
+                id: format!("test-id-paginate-{}", i),
+                project_name: format!("test-project-{}", i),
+                project: crate::project_config::ProjectConfig {
+                    repo_url: "https://github.com/test/test.git".to_string(),
+                    branch: "main".to_string(),
+                    project_type: ProjectType::Php,
+                    docker_service: None,
+                    working_dir: None,
+                    install_command: None,
+                    build_command: None,
+                    extra_command: None,
+                    run_user: None,
+                    env: std::collections::HashMap::new(),
+                    restart_service: crate::project_config::RestartService::None,
+                    docker_compose_path: crate::config::DockerComposePaths::None,
+                },
+                status: DeploymentStatus::Success,
+                created_at: Utc::now(),
+                started_at: None,
+                finished_at: None,
+            };
+            db.insert_deployment(&deployment).unwrap();
+        }
+
+        // Page 1 with page_size 2
+        let page1 = db.get_deployments_paginated(1, 2).unwrap();
+        assert_eq!(page1.len(), 2);
+
+        // Page 2 with page_size 2
+        let page2 = db.get_deployments_paginated(2, 2).unwrap();
+        assert_eq!(page2.len(), 2);
+
+        // Page 3 with page_size 2
+        let page3 = db.get_deployments_paginated(3, 2).unwrap();
+        assert_eq!(page3.len(), 1);
+
+        // Page 4 with page_size 2 (beyond data)
+        let page4 = db.get_deployments_paginated(4, 2).unwrap();
+        assert_eq!(page4.len(), 0);
+    }
+
+    #[test]
+    fn test_get_deployments_count() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("test.db");
+
+        let db = Database::new(&db_path).unwrap();
+
+        assert_eq!(db.get_deployments_count().unwrap(), 0);
+
+        let deployment = Deployment {
+            id: "test-id-count".to_string(),
+            project_name: "test-project".to_string(),
+            project: crate::project_config::ProjectConfig {
+                repo_url: "https://github.com/test/test.git".to_string(),
+                branch: "main".to_string(),
+                project_type: ProjectType::Php,
+                docker_service: None,
+                working_dir: None,
+                install_command: None,
+                build_command: None,
+                extra_command: None,
+                run_user: None,
+                env: std::collections::HashMap::new(),
+                restart_service: crate::project_config::RestartService::None,
+                docker_compose_path: crate::config::DockerComposePaths::None,
+            },
+            status: DeploymentStatus::Success,
+            created_at: Utc::now(),
+            started_at: None,
+            finished_at: None,
+        };
+        db.insert_deployment(&deployment).unwrap();
+
+        assert_eq!(db.get_deployments_count().unwrap(), 1);
     }
 }

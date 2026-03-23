@@ -2,12 +2,20 @@
 
 use askama::Template;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     response::{Html, Redirect},
 };
 
 use crate::deploy::manager::Deployment;
 use crate::webhook::handler::WebhookAppState;
+
+const PAGE_SIZE: u32 = 20;
+
+/// Query parameters for list page
+#[derive(serde::Deserialize)]
+pub struct ListQuery {
+    pub page: Option<u32>,
+}
 
 /// List page template
 #[derive(Template)]
@@ -25,13 +33,72 @@ struct DetailTemplate<'a> {
     status_str: &'a str,
 }
 
-/// List all deployments
+/// List deployments with pagination
 pub async fn list_deployments(
     State(state): State<WebhookAppState>,
+    Query(query): Query<ListQuery>,
 ) -> Html<String> {
-    let deployments = state.deployment_manager.get_all_deployments();
+    let page = query.page.unwrap_or(1).max(1);
+    let deployments = state.deployment_manager.get_deployments_paginated(page, PAGE_SIZE);
     let template = ListTemplate { deployments: &deployments };
     Html(template.render().unwrap())
+}
+
+/// API endpoint for infinite scroll - returns HTML fragment of deployment rows
+pub async fn deployments_api(
+    State(state): State<WebhookAppState>,
+    Query(query): Query<ListQuery>,
+) -> Html<String> {
+    let page = query.page.unwrap_or(1).max(1);
+    let deployments = state.deployment_manager.get_deployments_paginated(page, PAGE_SIZE);
+
+    if deployments.is_empty() {
+        return Html(String::new());
+    }
+
+    let html = deployments
+        .iter()
+        .map(|d| {
+            let actions = match d.status.to_string().as_str() {
+                "Pending" => format!(
+                    r#"<a href="/deploy/{}">查看</a>
+                <form method="POST" action="/deploy/{}/delete" style="display:inline;">
+                    <button type="submit" class="btn-delete">删除</button>
+                </form>"#,
+                    d.id, d.id
+                ),
+                "Failed" => format!(
+                    r#"<a href="/deploy/{}">查看</a>
+                <form method="POST" action="/deploy/{}/retry" style="display:inline;">
+                    <button type="submit" class="btn-retry">重试</button>
+                </form>"#,
+                    d.id, d.id
+                ),
+                _ => format!(r#"<a href="/deploy/{}">查看</a>"#, d.id),
+            };
+            format!(
+                r#"<tr>
+            <td><a href="/deploy/{}">{}</a></td>
+            <td>{}</td>
+            <td>{}</td>
+            <td><span class="status {}">{}</span></td>
+            <td>{}</td>
+            <td>{}</td>
+        </tr>"#,
+                d.id,
+                d.id,
+                d.project_name,
+                d.project.branch,
+                d.status,
+                d.status,
+                d.created_at_local(),
+                actions
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+
+    Html(html)
 }
 
 /// Show deployment detail

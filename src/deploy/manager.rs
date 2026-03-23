@@ -242,6 +242,7 @@ impl DeploymentManager {
     }
 
     /// Get all deployments
+    #[allow(dead_code)]
     pub fn get_all_deployments(&self) -> Vec<Deployment> {
         // First check in-memory queue
         let queue = self.queue.lock();
@@ -250,6 +251,29 @@ impl DeploymentManager {
 
         // Get from database
         let from_db = self.db.get_all_deployments().unwrap_or_default();
+
+        // Merge, preferring in-memory (more current) and removing duplicates
+        let mut all: Vec<Deployment> = from_db;
+        for m in in_memory {
+            if !all.iter().any(|d| d.id == m.id) {
+                all.push(m);
+            }
+        }
+
+        // Sort by created_at descending
+        all.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        all
+    }
+
+    /// Get deployments paginated
+    pub fn get_deployments_paginated(&self, page: u32, page_size: u32) -> Vec<Deployment> {
+        // First check in-memory queue
+        let queue = self.queue.lock();
+        let in_memory: Vec<Deployment> = queue.iter().cloned().collect();
+        drop(queue);
+
+        // Get from database
+        let from_db = self.db.get_deployments_paginated(page, page_size).unwrap_or_default();
 
         // Merge, preferring in-memory (more current) and removing duplicates
         let mut all: Vec<Deployment> = from_db;
