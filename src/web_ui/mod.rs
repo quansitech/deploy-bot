@@ -88,7 +88,7 @@ pub async fn deployments_api(
                 d.id,
                 d.id,
                 d.project_name,
-                d.project.branch,
+                d.project.branch.as_deref().unwrap_or("N/A"),
                 d.status,
                 d.status,
                 d.created_at_local(),

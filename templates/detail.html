@@ -15,10 +15,10 @@
     <div>{{ deployment.project_name }}</div>
 
     <div class="detail-label">仓库地址</div>
-    <div>{{ deployment.project.repo_url }}</div>
+    <div>{% match deployment.project.repo_url %}{% when Some with (u) %}{{ u }}{% when None %}N/A{% endmatch %}</div>
 
     <div class="detail-label">分支</div>
-    <div>{{ deployment.project.branch }}</div>
+    <div>{% match deployment.project.branch %}{% when Some with (b) %}{{ b }}{% when None %}N/A{% endmatch %}</div>
 
     <div class="detail-label">项目类型</div>
     <div>{{ deployment.project.project_type }}</div>

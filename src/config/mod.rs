@@ -16,6 +16,7 @@ pub struct ServerConfig {
     pub github_secret: Option<String>,
     pub gitlab_token: Option<String>,
     pub codeup_token: Option<String>,
+    pub webhook_token: Option<String>,
     pub workspace_dir: String,
     #[serde(default)]
     pub docker_compose_path: DockerComposePaths,
@@ -39,6 +40,7 @@ pub enum ProjectType {
     Rust,
     Python,
     Php,
+    Git,
     Custom,
 }
 
@@ -156,6 +158,7 @@ impl fmt::Display for ProjectType {
             ProjectType::Rust => write!(f, "rust"),
             ProjectType::Python => write!(f, "python"),
             ProjectType::Php => write!(f, "php"),
+            ProjectType::Git => write!(f, "git"),
             ProjectType::Custom => write!(f, "custom"),
         }
     }

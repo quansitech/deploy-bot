@@ -22,7 +22,7 @@
         <tr>
             <td><a href="/deploy/{{ deployment.id }}">{{ deployment.id }}</a></td>
             <td>{{ deployment.project_name }}</td>
-            <td>{{ deployment.project.branch }}</td>
+            <td>{% match deployment.project.branch %}{% when Some with (b) %}{{ b }}{% when None %}N/A{% endmatch %}</td>
             <td><span class="status {{ deployment.status }}">{{ deployment.status }}</span></td>
             <td>{{ deployment.created_at_local() }}</td>
             <td>

@@ -42,6 +42,7 @@ docker_compose_path = "./docker-compose.yaml"
 | github_secret | 否 | GitHub Webhook 签名密钥 |
 | gitlab_token | 否 | GitLab Webhook Token |
 | codeup_token | 否 | 阿里云 Codeup Webhook Token |
+| webhook_token | 否 | 通用 Webhook Token（用于任意来源的触发） |
 | update_script | 否 | 自更新脚本路径 |
 | update_webhook_secret | 否 | 自更新 Webhook 验证密钥 |
 | github_mirror | 否 | GitHub 镜像地址（用于自更新下载加速） |
@@ -97,6 +98,27 @@ GitLab Webhook Token。用于验证 GitLab Webhook 请求。
 
 #### codeup_token
 阿里云 Codeup Webhook Token。用于验证阿里云 Codeup Webhook 请求。
+
+#### webhook_token
+通用 Webhook Token。用于验证任意来源的 Webhook 请求。
+
+**使用场景：**
+- 从非 GitHub/GitLab/Codeup 平台触发部署
+- 自定义触发脚本
+- 手动触发部署
+
+**触发方式：**
+```bash
+curl -X POST http://your-server:8080/webhook/my-project \
+  -H "X-Webhook-Token: your-webhook-token"
+```
+
+**验证顺序：**
+系统会按以下顺序检查认证方式，任意一个通过即可：
+1. GitHub 签名验证（X-Hub-Signature-256）
+2. GitLab Token 验证（X-Gitlab-Token）
+3. Codeup Token 验证（X-Codeup-Token）
+4. 通用 Token 验证（X-Webhook-Token）
 
 ### 2. 配置项目
 
@@ -223,9 +245,9 @@ sudo chmod +x /opt/deploy-bot/deploy-bot
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| repo_url | 是 | Git 仓库地址 |
-| branch | 是 | 部署分支 |
-| project_type | 是 | 项目类型：nodejs/rust/python/php/custom |
+| repo_url | 条件必填 | Git 仓库地址（git/nodejs/rust/python/php 类型必填，custom 类型可选） |
+| branch | 条件必填 | 部署分支（git/nodejs/rust/python/php 类型必填，custom 类型可选） |
+| project_type | 是 | 项目类型：git/nodejs/rust/python/php/custom |
 | docker_service | 否 | Docker 服务名称，配合 docker-compose 使用 |
 | working_dir | 否 | 命令执行的工作目录 |
 | run_user | 否 | 运行命令的用户（如 www-data、nginx） |
@@ -341,11 +363,12 @@ docker_compose_path = ["/path/to/base.yaml", "/path/to/override.yaml"]
 
 | 项目类型 | 默认安装命令 | 默认构建命令 | 说明 |
 |----------|--------------|--------------|------|
+| **git** | 无 | 无 | 只执行 git pull，适用于静态文件、配置文件、预编译产物 |
 | **nodejs** | 自动检测：pnpm > yarn > npm | `npm run build` | 根据 lock 文件自动选择包管理器 |
 | **python** | poetry > venv + pip | 无（Python 无需构建） | poetry.lock 优先；否则使用虚拟环境 .venv 安装 |
 | **php** | `composer install --no-dev` | 无（PHP 无需构建） | - |
 | **rust** | 无（cargo build 自动处理依赖） | `cargo build --release` | 构建阶段自动处理依赖 |
-| **custom** | 无 | 无 | 需要手动指定 install_command 和 build_command |
+| **custom** | 无 | 无 | 完全自定义，不执行 git pull，适用于非 git 源部署 |
 
 **自动检测优先级：**
 - Node.js: `pnpm-lock.yaml` → `yarn.lock` → `npm`
@@ -353,6 +376,15 @@ docker_compose_path = ["/path/to/base.yaml", "/path/to/override.yaml"]
 
 **示例：**
 ```yaml
+# Git 项目（只拉取代码）
+project_type = "git"
+repo_url = "https://github.com/username/static-site.git"
+branch = "main"
+# 只执行 git pull，不安装依赖，不构建
+# 可选：拉取后执行自定义操作
+extra_command = "cp -r dist/* /var/www/html/"
+restart_service = "nginx"
+
 # Node.js 项目（自动检测）
 project_type = "nodejs"
 # 安装: pnpm install / yarn install / npm install
@@ -374,9 +406,12 @@ project_type = "php"
 project_type = "rust"
 # 构建: cargo build --release (无需单独安装)
 
-# 自定义项目
+# 自定义项目（完全自定义部署流程）
 project_type = "custom"
-# 需要手动指定 install_command 和 build_command
+# 不执行 git pull，不需要 repo_url 和 branch
+# 适用于从非 git 源部署（如 S3、FTP）或纯运维操作
+extra_command = "aws s3 sync s3://my-bucket/dist /var/www/html"
+restart_service = "nginx"
 ```
 
 ## API 端点

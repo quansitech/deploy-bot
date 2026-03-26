@@ -54,6 +54,7 @@ pub async fn install_dependencies(
         ProjectType::Php => {
             install_php(project_dir, docker_compose_paths, docker_compose_command, docker_service, working_dir, run_user, log_callback).await
         }
+        ProjectType::Git => Ok(String::new()), // No-op for git
         ProjectType::Custom => Ok(String::new()), // No-op for custom
     }
 }

@@ -5,7 +5,7 @@ use std::process::Command;
 use std::sync::Arc;
 use tracing::{info, error};
 
-use crate::config::{DockerComposeCommand};
+use crate::config::{DockerComposeCommand, ProjectType};
 use crate::deploy::manager::{Deployment, DeploymentManager, DeploymentStatus};
 use crate::git;
 use crate::installer;
@@ -128,27 +128,32 @@ pub async fn execute_deployment(
     let project = &deployment.project;
     let project_dir = PathBuf::from(workspace_dir).join(&project_name);
 
-    // Step 1: Pull repository
-    let user_prefix = get_user_log_prefix(project.run_user.as_deref());
-    deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Pulling repository..."));
-    match git::pull_repo(
-        project.repo_url.clone(),
-        project_dir.clone(),
-        project.branch.clone(),
-        None, // SSH key - TODO: add to config
-        project.run_user.as_deref(),
-    ).await {
-        Ok(_) => {
-            info!("Git pull successful for {}", project_name);
-            deployment_manager.add_log(&deployment_id, "info", "Git pull successful");
+    // Step 1: Pull repository (skip for Custom type)
+    if project.project_type != ProjectType::Custom {
+        let user_prefix = get_user_log_prefix(project.run_user.as_deref());
+        deployment_manager.add_log(&deployment_id, "info", &format!("{user_prefix}Pulling repository..."));
+        match git::pull_repo(
+            project.repo_url.clone().unwrap_or_default(),
+            project_dir.clone(),
+            project.branch.clone().unwrap_or_default(),
+            None, // SSH key - TODO: add to config
+            project.run_user.as_deref(),
+        ).await {
+            Ok(_) => {
+                info!("Git pull successful for {}", project_name);
+                deployment_manager.add_log(&deployment_id, "info", "Git pull successful");
+            }
+            Err(e) => {
+                error!("Git pull failed for {}: {}", project_name, e);
+                deployment_manager.add_log(&deployment_id, "error", &format!("Git pull failed: {e}"));
+                deployment_manager.update_status(&deployment_id, DeploymentStatus::Failed);
+                deployment_manager.add_log(&deployment_id, "info", "Deployment failed");
+                return;
+            }
         }
-        Err(e) => {
-            error!("Git pull failed for {}: {}", project_name, e);
-            deployment_manager.add_log(&deployment_id, "error", &format!("Git pull failed: {e}"));
-            deployment_manager.update_status(&deployment_id, DeploymentStatus::Failed);
-            deployment_manager.add_log(&deployment_id, "info", "Deployment failed");
-            return;
-        }
+    } else {
+        deployment_manager.add_log(&deployment_id, "info", "Skipping git pull for custom project type");
+        info!("Skipping git pull for custom project type: {}", project_name);
     }
 
     // Step 2: Install dependencies
@@ -389,8 +394,8 @@ mod tests {
             id: "test-id".to_string(),
             project_name: project_name.to_string(),
             project: ProjectConfig {
-                repo_url: "https://github.com/test/repo.git".to_string(),
-                branch: "main".to_string(),
+                repo_url: Some("https://github.com/test/repo.git".to_string()),
+                branch: Some("main".to_string()),
                 project_type: ProjectType::Nodejs,
                 docker_service: Some("node".to_string()),
                 working_dir: None,
@@ -444,8 +449,8 @@ mod tests {
             id: "test-id-2".to_string(),
             project_name: project_name.to_string(),
             project: ProjectConfig {
-                repo_url: "https://github.com/test/repo.git".to_string(),
-                branch: "main".to_string(),
+                repo_url: Some("https://github.com/test/repo.git".to_string()),
+                branch: Some("main".to_string()),
                 project_type: ProjectType::Nodejs,
                 docker_service: None,
                 working_dir: None,

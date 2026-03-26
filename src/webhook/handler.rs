@@ -71,7 +71,11 @@ pub async fn handle_webhook(
     let project = ProjectConfig::load_from_file(&config_file)
         .map_err(|e| AppError::Config(format!("Failed to load project config: {e}")))?;
 
-    info!("Project config loaded: repo_url={}, branch={}, project_type={}, docker_service={:?}, working_dir={:?}, restart_service={:?}",
+    // Step 3.5: 验证项目配置
+    project.validate()
+        .map_err(|e| AppError::Config(format!("Invalid project config: {e}")))?;
+
+    info!("Project config loaded: repo_url={:?}, branch={:?}, project_type={}, docker_service={:?}, working_dir={:?}, restart_service={:?}",
         project.repo_url, project.branch, project.project_type, project.docker_service, project.working_dir, project.restart_service.to_services());
 
     // Step 4: 将部署任务加入队列
@@ -140,18 +144,134 @@ fn validate_webhook_request(
         }
     }
 
+    // Generic webhook token: X-Webhook-Token
+    if let Some(token) = headers.get("X-Webhook-Token") {
+        if let Some(secret) = &server_config.webhook_token {
+            let token_str = token.to_str()
+                .map_err(|_| AppError::WebhookValidation("Invalid token header".to_string()))?;
+            if token_str == secret {
+                info!("Generic webhook token validated");
+                return Ok(());
+            } else {
+                return Err(AppError::WebhookValidation("Invalid webhook token".to_string()));
+            }
+        }
+    }
+
     // 没有配置任何平台的验证，返回错误
     Err(AppError::WebhookValidation(
-        "Webhook validation required but no valid token/secret found. Please configure at least one of: github_secret, gitlab_token, codeup_token".to_string()
+        "Webhook validation required but no valid token/secret found. Please configure at least one of: github_secret, gitlab_token, codeup_token, webhook_token".to_string()
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderMap;
 
     #[test]
     fn test_handler_function_exists() {
         let _ = handle_webhook as fn(_, _, _) -> _;
+    }
+
+    #[test]
+    fn test_validate_webhook_request_with_generic_token_valid() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Webhook-Token", "test-token-123".parse().unwrap());
+
+        let config = crate::config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            github_secret: None,
+            gitlab_token: None,
+            codeup_token: None,
+            webhook_token: Some("test-token-123".to_string()),
+            workspace_dir: "/tmp".to_string(),
+            docker_compose_path: crate::config::DockerComposePaths::None,
+            docker_compose_command: None,
+            update_script: None,
+            update_webhook_secret: None,
+            update_webhook_urls: None,
+            github_mirror: None,
+        };
+
+        let result = validate_webhook_request(&headers, b"test body", &config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_webhook_request_with_generic_token_invalid() {
+        let mut headers = HeaderMap::new();
+        headers.insert("X-Webhook-Token", "wrong-token".parse().unwrap());
+
+        let config = crate::config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            github_secret: None,
+            gitlab_token: None,
+            codeup_token: None,
+            webhook_token: Some("test-token-123".to_string()),
+            workspace_dir: "/tmp".to_string(),
+            docker_compose_path: crate::config::DockerComposePaths::None,
+            docker_compose_command: None,
+            update_script: None,
+            update_webhook_secret: None,
+            update_webhook_urls: None,
+            github_mirror: None,
+        };
+
+        let result = validate_webhook_request(&headers, b"test body", &config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid webhook token"));
+    }
+
+    #[test]
+    fn test_validate_webhook_request_with_generic_token_missing() {
+        let headers = HeaderMap::new();
+
+        let config = crate::config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            github_secret: None,
+            gitlab_token: None,
+            codeup_token: None,
+            webhook_token: Some("test-token-123".to_string()),
+            workspace_dir: "/tmp".to_string(),
+            docker_compose_path: crate::config::DockerComposePaths::None,
+            docker_compose_command: None,
+            update_script: None,
+            update_webhook_secret: None,
+            update_webhook_urls: None,
+            github_mirror: None,
+        };
+
+        let result = validate_webhook_request(&headers, b"test body", &config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("no valid token/secret found"));
+    }
+
+    #[test]
+    fn test_validate_webhook_request_no_auth_configured() {
+        let headers = HeaderMap::new();
+
+        let config = crate::config::ServerConfig {
+            host: "0.0.0.0".to_string(),
+            port: 8080,
+            github_secret: None,
+            gitlab_token: None,
+            codeup_token: None,
+            webhook_token: None,
+            workspace_dir: "/tmp".to_string(),
+            docker_compose_path: crate::config::DockerComposePaths::None,
+            docker_compose_command: None,
+            update_script: None,
+            update_webhook_secret: None,
+            update_webhook_urls: None,
+            github_mirror: None,
+        };
+
+        let result = validate_webhook_request(&headers, b"test body", &config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("webhook_token"));
     }
 }

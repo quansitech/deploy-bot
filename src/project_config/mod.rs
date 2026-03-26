@@ -27,12 +27,24 @@ impl RestartService {
     }
 }
 
+/// Deserialize an Option<String> treating empty strings as None
+fn deserialize_empty_string_as_none<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let opt = Option::<String>::deserialize(deserializer)?;
+    Ok(opt.filter(|s| !s.trim().is_empty()))
+}
+
 /// Project-level configuration loaded from .deploy.yaml
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProjectConfig {
-    pub repo_url: String,
-    pub branch: String,
+    #[serde(default)]
+    pub repo_url: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
     pub project_type: ProjectType,
+    #[serde(default, deserialize_with = "deserialize_empty_string_as_none")]
     pub docker_service: Option<String>,
     pub working_dir: Option<String>,
     pub install_command: Option<String>,
@@ -58,6 +70,32 @@ impl ProjectConfig {
         let content = std::fs::read_to_string(path)?;
         let config: ProjectConfig = toml::from_str(&content)?;
         Ok(config)
+    }
+
+    /// Validate project configuration
+    /// For non-Custom types, repo_url and branch must be configured
+    pub fn validate(&self) -> Result<(), String> {
+        // Custom type doesn't require git configuration
+        if self.project_type == ProjectType::Custom {
+            return Ok(());
+        }
+
+        // All other types require repo_url and branch
+        if self.repo_url.is_none() || self.repo_url.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+            return Err(format!(
+                "Project type '{}' requires repo_url to be configured",
+                self.project_type
+            ));
+        }
+
+        if self.branch.is_none() || self.branch.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+            return Err(format!(
+                "Project type '{}' requires branch to be configured",
+                self.project_type
+            ));
+        }
+
+        Ok(())
     }
 }
 
@@ -88,8 +126,8 @@ env = {{ APP_ENV = "production", DB_HOST = "localhost" }}
         file.flush().unwrap();
 
         let config = ProjectConfig::load_from_file(file.path()).unwrap();
-        assert_eq!(config.repo_url, "https://github.com/example/test.git");
-        assert_eq!(config.branch, "main");
+        assert_eq!(config.repo_url, Some("https://github.com/example/test.git".to_string()));
+        assert_eq!(config.branch, Some("main".to_string()));
         assert_eq!(config.project_type, ProjectType::Php);
         assert_eq!(config.docker_service, Some("php".to_string()));
         assert_eq!(config.working_dir, Some("/app".to_string()));
@@ -116,8 +154,8 @@ project_type = "nodejs"
         file.flush().unwrap();
 
         let config = ProjectConfig::load_from_file(file.path()).unwrap();
-        assert_eq!(config.repo_url, "https://github.com/example/test.git");
-        assert_eq!(config.branch, "main");
+        assert_eq!(config.repo_url, Some("https://github.com/example/test.git".to_string()));
+        assert_eq!(config.branch, Some("main".to_string()));
         assert_eq!(config.project_type, ProjectType::Nodejs);
         assert_eq!(config.docker_service, None);
         assert_eq!(config.working_dir, None);
@@ -155,6 +193,44 @@ project_type = "{}"
             let config = ProjectConfig::load_from_file(file.path()).unwrap();
             assert_eq!(config.project_type, expected, "Failed for type: {}", type_str);
         }
+    }
+
+    #[test]
+    fn test_project_config_docker_service_empty_string_is_none() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/example/test.git"
+branch = "main"
+project_type = "php"
+docker_service = ""
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.docker_service, None);
+    }
+
+    #[test]
+    fn test_project_config_docker_service_whitespace_is_none() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/example/test.git"
+branch = "main"
+project_type = "php"
+docker_service = "  "
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.docker_service, None);
     }
 
     #[test]
@@ -272,5 +348,96 @@ project_type = "python"
 
         let config = ProjectConfig::load_from_file(file.path()).unwrap();
         assert!(config.restart_service.to_services().is_empty());
+    }
+
+    #[test]
+    fn test_project_config_git_type_parsing() {
+        // Test parsing git project type
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/test/test.git"
+branch = "main"
+project_type = "git"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        assert_eq!(config.project_type, ProjectType::Git);
+    }
+
+    #[test]
+    fn test_validate_git_type_requires_repo_url() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+branch = "main"
+project_type = "git"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("repo_url"));
+    }
+
+    #[test]
+    fn test_validate_git_type_requires_branch() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+repo_url = "https://github.com/test/test.git"
+project_type = "git"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("branch"));
+    }
+
+    #[test]
+    fn test_validate_custom_type_no_repo_required() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+project_type = "custom"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        let result = config.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_nodejs_type_requires_repo() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(
+            file,
+            r#"
+project_type = "nodejs"
+"#
+        )
+        .unwrap();
+        file.flush().unwrap();
+
+        let config = ProjectConfig::load_from_file(file.path()).unwrap();
+        let result = config.validate();
+        assert!(result.is_err());
     }
 }

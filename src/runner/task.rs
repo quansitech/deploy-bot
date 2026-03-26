@@ -58,6 +58,7 @@ pub async fn run_build(
         ProjectType::Php => {
             Ok(String::new()) // PHP doesn't need build
         }
+        ProjectType::Git => Ok(String::new()), // No-op for git
         ProjectType::Custom => Ok(String::new()),
     }
 }

@@ -415,8 +415,8 @@ mod tests {
 
     fn create_test_project_config() -> ProjectConfig {
         ProjectConfig {
-            repo_url: "https://github.com/test/test.git".to_string(),
-            branch: "main".to_string(),
+            repo_url: Some("https://github.com/test/test.git".to_string()),
+            branch: Some("main".to_string()),
             project_type: ProjectType::Php,
             docker_service: Some("php".to_string()),
             working_dir: Some("/app".to_string()),
